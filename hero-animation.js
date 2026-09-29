@@ -15,28 +15,28 @@
   const BG_EDGE   = '#02060C';
 
   // ---- Spores (the small glowing dots) ----
-  const SPORE_COUNT        = 90;         // number of dots on desktop (0 = off)
+  const SPORE_COUNT        = 80;         // number of dots on desktop (0 = off)
   const SPORE_COUNT_MOBILE = 40;
-  const SPORE_ALPHA        = 3;       // brightness
-  const SPORE_SIZE         = 1.4;       // size multiplier (dot + glow together)
+  const SPORE_ALPHA        = 2.5;       // brightness
+  const SPORE_SIZE         = 1.2;       // size multiplier (dot + glow together)
   const SPORE_CORE         = 1;       // brightness of the bright centre (0 to 1)
   const SPORE_HALO         = 0.3;       // strength of the soft glow around it (0 = none, 2 = strong)
   const SPORE_CURSOR_GLOW  = 5;        // extra brightness near the cursor (0 = none)
   const SPORE_SPEED        = 1.25;        // how lively they drift (1 = slow, 3 = busy)
   const SPORE_TWINKLE      = 0;          // 0 = steady glow, 1 = soft pulse, 2 = strong pulse
   const SPORE_CURSOR_PUSH   = 200;        // max distance (px) a dot is nudged by the cursor
-  const SPORE_CURSOR_RADIUS = 200;       // how close the cursor must be to affect dots (px)
+  const SPORE_CURSOR_RADIUS = 300;       // how close the cursor must be to affect dots (px)
   const SPORE_LIFE_MIN = 4;              // each dot fades in, lives, fades out (seconds)
   const SPORE_LIFE_MAX = 20;
 
   // ---- Fluid flows (the soft curved light in the background) ----
   const FLOW_COUNT        = 5;           // number of flows (0 = off)
   const FLOW_COUNT_MOBILE = 3;
-  const FLOW_ALPHA   = 0.3;             // strength (0.04 = very faint, 0.12 = clear)
+  const FLOW_ALPHA   = 0.15;             // strength (0.04 = very faint, 0.12 = clear)
   const FLOW_WIDTH   = 150;              // thickness (px)
   const FLOW_WOBBLE  = 1;                // how curvy / organic (0 = smooth arcs, 2 = very wavy)
   const FLOW_SPEED   = 3;                // how fast the shapes morph
-  const FLOW_CURSOR  = 1.5;                // reaction to the cursor (0 = none, 2 = strong)
+  const FLOW_CURSOR  = 1.2;                // reaction to the cursor (0 = none, 2 = strong)
   const FLOW_NEAR    = 0.4;             // closest a flow may sit to the centre (bigger = pushed outward)
   const FLOW_FAR     = 1.10;             // furthest (above ~1.1 goes off screen)
 

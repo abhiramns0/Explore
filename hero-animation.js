@@ -2,7 +2,7 @@
    Draws on <canvas id="bg"> inside .hero-section.
      - deep ambient colour pooling at the sides and bottom
      - soft fluid "flows" of light that curve around the centre (they avoid the text and the top menu)
-     - drifting banks of mist, with tree silhouettes standing inside it
+     - drifting banks of mist
      - small glowing spores floating around, gently parting around the cursor
    Everything is built from soft gradients, and concentrated at the edges so the centre stays quiet. */
 (() => {
@@ -53,11 +53,6 @@
   const FOG_COUNT_MOBILE = 8;
   const FOG_ALPHA        = 0.11;         // mist strength (lower = subtler)
 
-  // ---- Tree silhouettes ----
-  const TRUNKS        = 0;               // per side (0 = off). These made the dark vertical bands
-  const TRUNKS_MOBILE = 0;
-  const TRUNK_ALPHA   = 0.55;
-
   // ---- Calm zone: keeps the centre, the text and the top menu quiet ----
   const CALM_X = 0.32;                   // width of the calm ellipse (fraction of screen width)
   const CALM_Y = 0.30;                   // height of the calm ellipse (fraction of screen height)
@@ -65,6 +60,8 @@
   const QUIET_FADE = 420;                // distance over which things fade back in (px)
   const NAV_ZONE_W = 520;                // clear area at the top middle (menu): width (px)
   const NAV_ZONE_H = 90;                 // ...and height (px)
+
+  const TOUCH_LINGER = 1400;             // on phones: how long (ms) the effect stays after the finger lifts
 
   const GRAIN = 0.02;                    // tiny film grain that hides gradient banding (0 = off)
 
@@ -95,7 +92,7 @@
   let intro = 0;
   let quiet = [];
   let fog = [], spores = [], flows = [];
-  const cursor = { x: 0, y: 0, tx: 0, ty: 0, k: 0, px: 0, py: 0, inside: false };
+  const cursor = { x: 0, y: 0, tx: 0, ty: 0, k: 0, px: 0, py: 0, inside: false, touch: false, holdUntil: 0 };
 
   /* ================= NOISE (for gentle organic drift) ================= */
   const grad3 = new Float32Array([
@@ -253,43 +250,6 @@
   const grainCv = makeGrain();
   let grainPattern = null;
 
-  /* ================= TREE SILHOUETTES (drawn once, softly) ================= */
-  const trunkCv = document.createElement('canvas');
-  const TRUNK_PAD = 40, TRUNK_SCALE = 0.5;
-  let hasTrunks = false;
-
-  function buildTrunks() {
-    const per = W < 768 ? TRUNKS_MOBILE : TRUNKS;
-    hasTrunks = per > 0;
-    if (!hasTrunks) return;
-    trunkCv.width = Math.ceil((W + TRUNK_PAD * 2) * TRUNK_SCALE);
-    trunkCv.height = Math.ceil((H + TRUNK_PAD * 2) * TRUNK_SCALE);
-    const t = trunkCv.getContext('2d');
-    const off = TRUNK_PAD * TRUNK_SCALE;
-    t.setTransform(TRUNK_SCALE, 0, 0, TRUNK_SCALE, off, off);
-    t.lineJoin = 'round';
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < per; i++) {
-        const depth = Math.random();                       // 0 = far, 1 = near
-        const frac = 0.01 + (i / per) * 0.21 + rand(-0.015, 0.015);
-        const x = side < 0 ? W * frac : W * (1 - frac);
-        const w = lerp(22, 78, depth) * ui;
-        const seed = rand(0, 100), lean = rand(-30, 30) * (0.5 + depth);
-        const a = TRUNK_ALPHA * (0.35 + 0.65 * depth);
-        for (let k = 0; k < 8; k++) {                      // stacked strokes = soft edges
-          t.lineWidth = w * (0.55 + 0.9 * k / 7);
-          t.strokeStyle = `rgba(1, 5, 10, ${(a * 0.17).toFixed(4)})`;
-          t.beginPath();
-          for (let y = -30; y <= H + 30; y += 40) {
-            const xx = x + Math.sin(y * 0.004 + seed) * 14 * (0.5 + depth) + lean * (y / H);
-            if (y === -30) t.moveTo(xx, y); else t.lineTo(xx, y);
-          }
-          t.stroke();
-        }
-      }
-    }
-  }
-
   /* ================= MIST ================= */
   function buildFog() {
     fogGrads = FOG_COLORS.map(fogGradient);
@@ -303,7 +263,7 @@
         hx: x, hy: y, rx, ry: rx * rand(0.28, 0.5),
         a: rand(0.55, 1) * FOG_ALPHA,
         variant: x < W * 0.5 ? (Math.random() < 0.6 ? 2 : 0) : (Math.random() < 0.6 ? 1 : 0),
-        layer: Math.random() < 0.6 ? 0 : 1,               // 0 = behind the trees, 1 = in front
+        layer: Math.random() < 0.6 ? 0 : 1,               // 0 = back layer, 1 = front layer
         ax: rand(60, 140), ay: rand(20, 50),
         sx: TAU / rand(70000, 130000), sy: TAU / rand(70000, 130000),
         p1: rand(0, TAU), p2: rand(0, TAU), p3: rand(0, TAU),
@@ -571,12 +531,14 @@
   function step(dt) {
     const e = rate => 1 - Math.exp(-rate * dt / 1000);
 
-    cursor.x += (cursor.tx - cursor.x) * e(4);
-    cursor.y += (cursor.ty - cursor.y) * e(4);
-    cursor.k += ((cursor.inside ? 1 : 0) - cursor.k) * e(2.2);
+    // "active" = mouse over the hero, finger on the screen, or just lifted (linger)
+    const active = cursor.inside || clock < cursor.holdUntil;
+    cursor.x += (cursor.tx - cursor.x) * e(cursor.touch ? 14 : 4);
+    cursor.y += (cursor.ty - cursor.y) * e(cursor.touch ? 14 : 4);
+    cursor.k += ((active ? 1 : 0) - cursor.k) * e(active && cursor.touch ? 9 : 2.2);
     const nx = W ? (cursor.x / W - 0.5) * 2 : 0, ny = H ? (cursor.y / H - 0.5) * 2 : 0;
-    cursor.px += ((cursor.inside ? nx : 0) - cursor.px) * e(1.5);
-    cursor.py += ((cursor.inside ? ny : 0) - cursor.py) * e(1.5);
+    cursor.px += ((active ? nx : 0) - cursor.px) * e(1.5);
+    cursor.py += ((active ? ny : 0) - cursor.py) * e(1.5);
 
     intro = smooth(clock / 3000);
 
@@ -605,11 +567,6 @@
     drawFlows();
     drawFlowLines();
     drawFog(0);
-    if (hasTrunks) {
-      ctx.globalAlpha = intro;
-      ctx.drawImage(trunkCv, -TRUNK_PAD - cursor.px * 8, -TRUNK_PAD - cursor.py * 4, W + TRUNK_PAD * 2, H + TRUNK_PAD * 2);
-      ctx.globalAlpha = 1;
-    }
     drawFog(1);
     drawCalm();
     drawSpores();
@@ -648,7 +605,7 @@
     if (!grainPattern) grainPattern = ctx.createPattern(grainCv, 'repeat');
     measure();
     if (rebuild || widthChanged || !fog.length) {
-      buildFog(); buildSpores(); buildFlows(); buildTrunks();
+      buildFog(); buildSpores(); buildFlows();
     }
     if (reduce) { step(0); draw(); }
   }
@@ -662,22 +619,40 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) start(); });
 
   if (!reduce) {
-    const setPointer = (cx, cy) => {
+    let lastTouch = 0;
+    const setPointer = (cx, cy, isTouch) => {
       const r = hero.getBoundingClientRect();
       const x = cx - r.left, y = cy - r.top;
       const inside = x >= 0 && x <= r.width && y >= 0 && y <= r.height;
+      cursor.touch = isTouch;
       if (inside) {
         if (!cursor.inside && cursor.k < 0.02) { cursor.x = x; cursor.y = y; }
         cursor.tx = x; cursor.ty = y;
+        cursor.holdUntil = 0;
       }
       cursor.inside = inside;
     };
-    window.addEventListener('mousemove', e => setPointer(e.clientX, e.clientY), { passive: true });
-    const touch = e => { const t = e.touches[0]; if (t) setPointer(t.clientX, t.clientY); };
+    // mouse (ignore the fake mouse events phones send right after a touch)
+    window.addEventListener('mousemove', e => {
+      if (performance.now() - lastTouch < 800) return;
+      setPointer(e.clientX, e.clientY, false);
+    }, { passive: true });
+    document.addEventListener('mouseleave', () => { if (!cursor.touch) cursor.inside = false; });
+
+    // touch: effect starts on touch, follows the finger, and lingers briefly after release
+    const touch = e => {
+      lastTouch = performance.now();
+      const t = e.touches[0];
+      if (t) setPointer(t.clientX, t.clientY, true);
+    };
+    const release = () => {
+      lastTouch = performance.now();
+      if (cursor.inside) { cursor.inside = false; cursor.holdUntil = clock + TOUCH_LINGER; }
+    };
     window.addEventListener('touchstart', touch, { passive: true });
     window.addEventListener('touchmove', touch, { passive: true });
-    window.addEventListener('touchend', () => { cursor.inside = false; });
-    document.addEventListener('mouseleave', () => { cursor.inside = false; });
+    window.addEventListener('touchend', release, { passive: true });
+    window.addEventListener('touchcancel', release, { passive: true });
 
     // Pause when the hero is scrolled out of view
     if ('IntersectionObserver' in window) {

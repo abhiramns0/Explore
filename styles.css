@@ -219,7 +219,8 @@ main {
 .pub-card {
     width: 100%;
     height: 100px;
-    background-color: rgba(0, 125, 255, 0.04);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(0, 125, 255, 0.05));
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
     border-radius: 35px;
     display: flex;
     align-items: center;
@@ -228,11 +229,38 @@ main {
     margin-bottom: 45px;
     text-decoration: none;
     color: #FFFFFF;
+    position: relative;
     transition: box-shadow 0.3s ease;
 }
 
 .pub-card:hover {
     box-shadow: 0px 0px 20px rgba(0, 0, 0, 0.15);
+}
+
+/* Gradient stroke (shared by pub cards, project cards, more-works, view-project button) */
+.pub-card::before,
+.project-bg::before,
+.more-works::before,
+.project-btn::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px; /* stroke thickness */
+    background: linear-gradient(135deg,
+        rgba(130, 195, 255, 0.45),
+        rgba(0, 125, 255, 0.06) 55%,
+        rgba(130, 195, 255, 0.25));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+}
+
+/* Project cards (desktop): stroke only on top and bottom edges */
+.project-bg::before {
+    padding: 1px 0;
 }
 
 .pub-title {
@@ -291,16 +319,17 @@ main {
     box-shadow: 0px 0px 25px rgba(0, 0, 0, 0.15);
 }
 
-.project-row:nth-child(1) .project-bg {
-    background-color: rgba(0, 0, 0, 0.7);
+/* nth-of-type counts only <article> siblings, so the <h2> no longer shifts the numbering */
+.project-row:nth-of-type(1) .project-bg {
+    background-color: rgba(255, 255, 255, 0.04);
 }
 
-.project-row:nth-child(2) .project-bg {
-    background-color: rgba(1, 29, 59, 0.32);
+.project-row:nth-of-type(2) .project-bg {
+    background-color: rgba(120, 190, 255, 0.06);
 }
 
-.project-row:nth-child(3) .project-bg {
-    background-color: rgba(0, 78, 159, 0.07);
+.project-row:nth-of-type(3) .project-bg {
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 .project-left .project-media {
@@ -348,17 +377,19 @@ main {
     color: #FFFFFF;
 }
 
+/* View Project button: gradient stroke, no glass */
 .project-btn {
     margin-top: 60px;
     width: 110px;
     height: 50px;
     background-color: rgba(255, 255, 255, 0.04);
     color: #FFFFFF;
-    border: 0.5px solid #FFFFFF;
+    border: none; /* replaced by the gradient stroke (::before) */
     border-radius: 15px;
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative; /* anchors the gradient stroke */
     text-decoration: none;
     font-family: 'Sansation';
     font-weight: 700;
@@ -375,9 +406,9 @@ main {
     width: 350px;
     height: 220px;
     margin: 80px auto;
-    background-color: rgba(255, 255, 255, 0.04);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(0, 125, 255, 0.05));
     border-radius: 40px;
-    box-shadow: 0 10px 10px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -426,6 +457,14 @@ main {
 
 .arrow-down:hover, .arrow-right:hover {
     animation-play-state: paused;
+}
+
+/* Glass effect (publication cards, project cards, more-works) */
+.pub-card,
+.project-bg,
+.more-works {
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
 }
 
 /* About Section */
@@ -579,16 +618,16 @@ main {
     .about {
         padding: 0 80px;
     }
-    
+
     .project-bg {
         left: -80px;
         right: -80px;
     }
-    
+
     .about-main {
         gap: 80px;
     }
-    
+
     .social-links {
         gap: 150px;
     }
@@ -600,72 +639,74 @@ main {
         gap: 50px;
         padding: 12px 25px;
     }
-    
+
     .navbar a {
         font-size: 13px;
     }
-    
+
     .hero-heading-image {
         width: 380px;
         margin: 60px auto 0;
     }
-    
+
     .hero-description {
         font-size: 17px;
         line-height: 32px;
         max-width: 600px;
         padding: 0 20px;
     }
-    
+
     .scroll-indicator {
         margin: 120px auto 0;
     }
-    
+
     .publications-section,
     .projects-wrap,
     .about {
         padding: 0 50px;
     }
-    
+
     .section-title {
         font-size: 28px;
         margin-bottom: 40px;
     }
 
-        .pub-card {
+    .pub-card {
         height: auto;
         min-height: 80px;
-        padding: 30px 50px 20px 25px; /* Adjusted to reserve space for icon */
+        padding: 30px 50px 20px 25px;
         border-radius: 25px;
         margin-bottom: 25px;
         flex-direction: column;
         align-items: flex-start;
         gap: 15px;
-        position: relative; /* Added to anchor absolute icon */
+        position: relative;
     }
+
     .pub-title {
         font-size: 16px;
         text-align: left;
         width: 100%;
-        padding-right: 24px; /* Added to ensure text wraps before icon */
+        padding-right: 24px;
     }
+
     .pub-card-icon {
-        position: absolute; /* Changed to pin icon in top-right */
-        top: 25px; /* Matches small phone optimal positioning, adjusted for padding */
-        right: 25px; /* Matches right padding offset */
-        margin-top: 0; /* Removed to avoid offset */
+        position: absolute;
+        top: 25px;
+        right: 25px;
+        margin-top: 0;
         width: 16px;
         height: 16px;
     }
-    
+
     .project-row {
         flex-direction: column !important;
         text-align: center;
         margin-bottom: 80px;
         position: relative;
-        padding-bottom: 100px; /* Increased from 15px to 25px for external breathing space */
+        padding-bottom: 100px;
     }
-    
+
     .project-left .project-media,
     .project-right .project-media {
         flex: none;
@@ -674,78 +715,83 @@ main {
         z-index: 2;
         position: relative;
     }
-    
+
     .project-image {
         width: 100%;
         max-width: 500px;
     }
-    
+
     .project-content {
         max-width: 100%;
         z-index: 1;
         position: relative;
-        padding: 25px 40px 60px 40px; /* Changed bottom padding from 40px to 60px (+20px) */
+        padding: 25px 40px 60px 40px;
         border-radius: 20px;
         margin-top: 20px;
     }
-    
+
     .project-left .project-content {
         margin-left: 0;
     }
-    
+
     .project-bg {
         position: absolute;
         left: 0px;
         right: 0px;
         top: auto;
-        bottom: -25px; /* Changed from -15px to -25px for external breathing space */
-        height: 300px; /* Increased from 280px to 300px to match padding increase */
+        bottom: -25px;
+        height: 300px;
         z-index: 0;
         border-radius: 64px;
     }
-    
+
+    /* Rounded stacked cards: full stroke on all four sides */
+    .project-bg::before {
+        padding: 1px;
+    }
+
     .project-btn {
         margin: 40px auto 0 auto;
         align-self: center;
     }
-    
+
     .about-main {
         flex-direction: column;
         gap: 50px;
         text-align: center;
     }
-    
+
     .profile-container {
         width: 300px;
         height: 300px;
     }
-    
+
     .profile-frame {
         width: 300px;
         height: 300px;
     }
-    
+
     .profile-image {
         top: 23px;
         left: 23px;
         width: 254px;
         height: 254px;
     }
-    
+
     .about-content {
         max-width: 100%;
     }
-    
+
     .hello-world {
         font-size: 24px;
         text-align: center;
     }
-    
+
     .about-text {
         font-size: 18px;
         text-align: center;
     }
-    
+
     .social-links {
         gap: 80px;
     }
@@ -758,22 +804,22 @@ main {
         padding: 10px 20px;
         top: 15px;
     }
-    
+
     .navbar a {
         font-size: 12px;
     }
-    
+
     .hero-section {
         height: 100vh;
         justify-content: flex-start;
         padding-top: 100px;
     }
-    
+
     .hero-heading-image {
         width: 320px;
         margin: 40px auto 0;
     }
-    
+
     .hero-description {
         font-size: 16px;
         line-height: 28px;
@@ -781,68 +827,70 @@ main {
         margin: 30px auto 0;
         padding: 0 20px;
     }
-    
+
     .scroll-indicator {
         margin: 80px auto 0;
         width: 50px;
         height: 50px;
     }
-    
+
     .hover-circle {
         width: 50px;
         height: 50px;
     }
-    
+
     .publications-section {
         margin-top: 100px;
     }
-    
+
     .publications-section,
     .projects-wrap,
     .about {
         padding: 0 25px;
     }
-    
+
     .section-title {
         font-size: 24px;
         margin-bottom: 30px;
         text-align: center;
     }
-    
+
     .pub-card {
         height: auto;
         min-height: 80px;
-        padding: 20px 50px 20px 25px; /* Adjusted to reserve space for icon */
+        padding: 20px 50px 20px 25px;
         border-radius: 25px;
         margin-bottom: 25px;
         flex-direction: column;
         align-items: flex-start;
         gap: 15px;
-        position: relative; /* Added to anchor absolute icon */
+        position: relative;
     }
+
     .pub-title {
         font-size: 16px;
         text-align: left;
         width: 100%;
-        padding-right: 24px; /* Added to ensure text wraps before icon */
+        padding-right: 24px;
     }
+
     .pub-card-icon {
-        position: absolute; /* Changed to pin icon in top-right */
-        top: 55px; /* Matches small phone optimal positioning, adjusted for padding */
-        right: 25px; /* Matches right padding offset */
-        margin-top: 0; /* Removed to avoid offset */
+        position: absolute;
+        top: 55px;
+        right: 25px;
+        margin-top: 0;
         width: 16px;
         height: 16px;
     }
-    
+
     .project-row {
         margin-bottom: 150px;
         flex-direction: column !important;
         text-align: center;
         position: relative;
-        padding-bottom: 10px; /* Increased from 10px to 30px to match background offset */
+        padding-bottom: 10px;
     }
-    
+
     .project-left .project-media,
     .project-right .project-media {
         flex: none;
@@ -851,137 +899,136 @@ main {
         z-index: 2;
         position: relative;
     }
-    
+
     .project-image {
         max-width: 100%;
         border-radius: 15px;
     }
-    
+
     .project-content {
         max-width: 100%;
         z-index: 1;
         position: relative;
-        padding: 25px 30px 35px 30px; /* Increased bottom padding from 35px to 65px */
+        padding: 25px 30px 35px 30px;
         border-radius: 15px;
-        margin-top: 20px; /* Reduced from 20px to 10px to shrink image-content gap 88888*/
+        margin-top: 20px;
         align-items: center;
     }
-    
+
     .project-left .project-content {
         margin-left: 0;
     }
-    
+
     .project-title {
         font-size: 20px;
-        margin-bottom: 10px; /* 15 */
+        margin-bottom: 10px;
     }
-    
+
     .project-text {
         font-size: 15px;
         line-height: 24px;
-        margin-top: 10px; /* 15 */
+        margin-top: 10px;
     }
-    
+
     .project-btn {
-        margin: 30px auto 0 auto; /* Reduced from 25px to 15px to fit within background */
+        margin: 30px auto 0 auto;
         width: 100px;
         height: 45px;
         font-size: 13px;
         align-self: center;
     }
-    
+
     .project-bg {
         position: absolute;
         left: 0px;
         right: 0px;
-        top: 100;
-        bottom: -140px; /* Increased from -10px to -30px for full coverage 88888 */
-        height: 300px; /* Stretches to cover content */
+        bottom: -140px;
+        height: 300px;
         z-index: 0;
         border-radius: 32px;
     }
-    
+
     .pub-card-icon {
         align-self: flex-end;
         margin-top: -30px;
         width: 16px;
         height: 16px;
     }
-    
+
     .more-works {
         width: 280px;
         height: 180px;
         margin: 60px auto;
         border-radius: 30px;
     }
-    
+
     .more-works-title {
         margin-top: 50px;
         font-size: 22px;
     }
-    
+
     .arrow-right-wrap {
         margin-top: 25px;
     }
-    
+
     .dotted-divider {
         margin: 80px 0;
     }
-    
+
     .about {
         padding: 60px 25px 0;
     }
-    
+
     .profile-container {
         width: 250px;
         height: 250px;
     }
-    
+
     .profile-frame {
         width: 250px;
         height: 250px;
     }
-    
+
     .profile-image {
         top: 19px;
         left: 19px;
         width: 212px;
         height: 212px;
     }
-    
+
     .hello-world {
         font-size: 22px;
         margin-bottom: 30px;
     }
-    
+
     .about-text {
         font-size: 16px;
         line-height: 26px;
     }
-    
+
     .social-container {
         margin-top: 50px;
         margin-bottom: 60px;
     }
-    
+
     .social-links {
         gap: 60px;
         flex-wrap: wrap;
     }
-    
+
     .social-icon {
         width: 40px;
         height: 40px;
     }
-    
+
     .social-link span {
         font-size: 13px;
     }
-    
+
     .signature-image {
         width: 150px;
     }
-    
+
     .copyright {
         font-size: 14px;
         padding-bottom: 40px;
@@ -994,58 +1041,58 @@ main {
         gap: 20px;
         padding: 8px 15px;
     }
-    
+
     .navbar a {
         font-size: 11px;
     }
-    
+
     .hero-heading-image {
         width: 280px;
     }
-    
+
     .hero-description {
         font-size: 15px;
         line-height: 26px;
     }
-    
+
     .publications-section,
     .projects-wrap,
     .about {
         padding: 0 20px;
     }
-    
+
     .section-title {
         font-size: 22px;
     }
-    
+
     .pub-card {
-        padding: 18px 40px 18px 20px; /* Adjusted to reserve space for icon */
+        padding: 18px 40px 18px 20px;
         border-radius: 20px;
-        position: relative; /* Added to anchor absolute icon */
+        position: relative;
     }
-    
+
     .pub-title {
         font-size: 15px;
-        padding-right: 20px; /* Added to ensure text wraps before icon */
+        padding-right: 20px;
     }
 
     .pub-card-icon {
-        position: absolute; /* Changed to pin icon in top-right */
-        top: 50px; /* Matches top padding of pub-card */
-        right: 20px; /* Matches right padding offset */
-        margin-top: 0; /* Removed to avoid offset */
+        position: absolute;
+        top: 50px;
+        right: 20px;
+        margin-top: 0;
         width: 14px;
         height: 14px;
     }
-    
+
     .project-row {
         margin-bottom: 150px;
         flex-direction: column !important;
         text-align: center;
         position: relative;
-        padding-bottom: 5px; /* ← Adds visual space for background overflow 88888*/
+        padding-bottom: 5px;
     }
-    
+
     .project-left .project-media,
     .project-right .project-media {
         flex: none;
@@ -1054,7 +1101,7 @@ main {
         z-index: 2;
         position: relative;
     }
-    
+
     .project-content {
         max-width: 100%;
         z-index: 1;
@@ -1064,102 +1111,101 @@ main {
         margin-top: 0px;
         align-items: center;
     }
-    
+
     .project-left .project-content {
         margin-left: 0;
     }
-    
+
     .project-title {
         font-size: 18px;
     }
-    
+
     .project-text {
         font-size: 14px;
         line-height: 22px;
     }
-    
+
     .project-btn {
         margin: 20px auto 0 auto;
         align-self: center;
     }
-    
+
     .project-bg {
         position: absolute;
         left: 0px;
         right: 0px;
         top: auto;
-        bottom: -5;
-        height: 300px; /* 888888 increased */
+        height: 300px;
         z-index: 0;
         border-radius: 32px;
     }
-    
+
     .pub-card-icon {
         align-self: flex-end;
         margin-top: -25px;
         width: 14px;
         height: 14px;
     }
-    
+
     .more-works {
         width: 250px;
         height: 160px;
         border-radius: 25px;
     }
-    
+
     .more-works-title {
         margin-top: 45px;
         font-size: 20px;
     }
-    
+
     .arrow-right-wrap {
         margin-top: 20px;
     }
-    
+
     .about-main {
         gap: 40px;
     }
-    
+
     .profile-container {
         width: 200px;
         height: 200px;
     }
-    
+
     .profile-frame {
         width: 200px;
         height: 200px;
     }
-    
+
     .profile-image {
         top: 15px;
         left: 15px;
         width: 170px;
         height: 170px;
     }
-    
+
     .hello-world {
         font-size: 20px;
     }
-    
+
     .about-text {
         font-size: 15px;
         line-height: 24px;
     }
-    
+
     .social-links {
         gap: 40px;
         justify-content: space-around;
     }
-    
+
     .social-icon {
         width: 35px;
         height: 35px;
     }
-    
+
     .signature-image {
         width: 130px;
     }
-    
+
     .copyright {
         font-size: 13px;
     }

@@ -17,15 +17,15 @@
   // ---- Spores (the small glowing dots) ----
   const SPORE_COUNT        = 90;         // number of dots on desktop (0 = off)
   const SPORE_COUNT_MOBILE = 40;
-  const SPORE_ALPHA        = 0.95;       // brightness
-  const SPORE_SIZE         = 1.15;       // size multiplier (dot + glow together)
-  const SPORE_CORE         = 1.5;       // brightness of the bright centre (0 to 1)
-  const SPORE_HALO         = 0.5;       // strength of the soft glow around it (0 = none, 2 = strong)
-  const SPORE_CURSOR_GLOW  = 0.8;        // extra brightness near the cursor (0 = none)
+  const SPORE_ALPHA        = 2;       // brightness
+  const SPORE_SIZE         = 3;       // size multiplier (dot + glow together)
+  const SPORE_CORE         = 2;       // brightness of the bright centre (0 to 1)
+  const SPORE_HALO         = 0.4;       // strength of the soft glow around it (0 = none, 2 = strong)
+  const SPORE_CURSOR_GLOW  = 2;        // extra brightness near the cursor (0 = none)
   const SPORE_SPEED        = 1.25;        // how lively they drift (1 = slow, 3 = busy)
   const SPORE_TWINKLE      = 1;          // 0 = steady glow, 1 = soft pulse, 2 = strong pulse
-  const SPORE_CURSOR_PUSH   = 500;        // max distance (px) a dot is nudged by the cursor
-  const SPORE_CURSOR_RADIUS = 1000;       // how close the cursor must be to affect dots (px)
+  const SPORE_CURSOR_PUSH   = 1000;        // max distance (px) a dot is nudged by the cursor
+  const SPORE_CURSOR_RADIUS = 2000;       // how close the cursor must be to affect dots (px)
   const SPORE_LIFE_MIN = 9;              // each dot fades in, lives, fades out (seconds)
   const SPORE_LIFE_MAX = 20;
 
@@ -49,7 +49,7 @@
   const LINE_COLOR   = '150, 215, 235';  // r, g, b
 
   // ---- Mist ----
-  const FOG_COUNT        = 13;           // mist banks (desktop)
+  const FOG_COUNT        = 0;           // mist banks (desktop)
   const FOG_COUNT_MOBILE = 8;
   const FOG_ALPHA        = 0.11;         // mist strength (lower = subtler)
 

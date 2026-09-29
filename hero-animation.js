@@ -17,27 +17,27 @@
   // ---- Spores (the small glowing dots) ----
   const SPORE_COUNT        = 90;         // number of dots on desktop (0 = off)
   const SPORE_COUNT_MOBILE = 40;
-  const SPORE_ALPHA        = 2;       // brightness
-  const SPORE_SIZE         = 3;       // size multiplier (dot + glow together)
-  const SPORE_CORE         = 2;       // brightness of the bright centre (0 to 1)
+  const SPORE_ALPHA        = 5;       // brightness
+  const SPORE_SIZE         = 5;       // size multiplier (dot + glow together)
+  const SPORE_CORE         = 3;       // brightness of the bright centre (0 to 1)
   const SPORE_HALO         = 0.4;       // strength of the soft glow around it (0 = none, 2 = strong)
-  const SPORE_CURSOR_GLOW  = 2;        // extra brightness near the cursor (0 = none)
+  const SPORE_CURSOR_GLOW  = 5;        // extra brightness near the cursor (0 = none)
   const SPORE_SPEED        = 1.25;        // how lively they drift (1 = slow, 3 = busy)
   const SPORE_TWINKLE      = 1;          // 0 = steady glow, 1 = soft pulse, 2 = strong pulse
-  const SPORE_CURSOR_PUSH   = 1000;        // max distance (px) a dot is nudged by the cursor
-  const SPORE_CURSOR_RADIUS = 2000;       // how close the cursor must be to affect dots (px)
+  const SPORE_CURSOR_PUSH   = 5000;        // max distance (px) a dot is nudged by the cursor
+  const SPORE_CURSOR_RADIUS = 5000;       // how close the cursor must be to affect dots (px)
   const SPORE_LIFE_MIN = 9;              // each dot fades in, lives, fades out (seconds)
   const SPORE_LIFE_MAX = 20;
 
   // ---- Fluid flows (the soft curved light in the background) ----
   const FLOW_COUNT        = 5;           // number of flows (0 = off)
   const FLOW_COUNT_MOBILE = 3;
-  const FLOW_ALPHA   = 0.07;             // strength (0.04 = very faint, 0.12 = clear)
+  const FLOW_ALPHA   = 0.1;             // strength (0.04 = very faint, 0.12 = clear)
   const FLOW_WIDTH   = 170;              // thickness (px)
   const FLOW_WOBBLE  = 1;                // how curvy / organic (0 = smooth arcs, 2 = very wavy)
-  const FLOW_SPEED   = 1;                // how fast the shapes morph
-  const FLOW_CURSOR  = 1;                // reaction to the cursor (0 = none, 2 = strong)
-  const FLOW_NEAR    = 0.82;             // closest a flow may sit to the centre (bigger = pushed outward)
+  const FLOW_SPEED   = 2;                // how fast the shapes morph
+  const FLOW_CURSOR  = 2;                // reaction to the cursor (0 = none, 2 = strong)
+  const FLOW_NEAR    = 0.52;             // closest a flow may sit to the centre (bigger = pushed outward)
   const FLOW_FAR     = 1.10;             // furthest (above ~1.1 goes off screen)
 
   // ---- Thin fluid lines (drawn along the flows) ----

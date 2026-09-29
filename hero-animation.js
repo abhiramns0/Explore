@@ -63,7 +63,7 @@
 
   const TOUCH_LINGER = 1400;             // on phones: how long (ms) the effect stays after the finger lifts
 
-  const GRAIN = 0.04;                    // tiny film grain that hides gradient banding (0 = off)
+  const GRAIN = 0;                    // tiny film grain that hides gradient banding (0 = off)
 
   // Ambient colour pools (x, y, radius as fractions of the screen)
   const GLOWS = [

@@ -67,10 +67,10 @@
 
   // Ambient colour pools (x, y, radius as fractions of the screen)
   const GLOWS = [
-    { x: 0.00, y: 0.60, r: 0.55, c: '30, 110, 140', a: 0.16, p: 0 },   // left, teal
-    { x: 1.00, y: 0.30, r: 0.50, c: '40, 100, 180', a: 0.14, p: 2 },   // right, blue
-    { x: 0.15, y: 1.00, r: 0.45, c: '40, 150, 130', a: 0.12, p: 4 },   // bottom-left, green-teal
-    { x: 0.90, y: 1.00, r: 0.40, c: '50, 120, 170', a: 0.10, p: 1 }    // bottom-right
+    { x: 0.00, y: 0.60, r: 0.55, c: '140, 200, 235', a: 0.16, p: 0 },   // left, teal
+    { x: 1.00, y: 0.30, r: 0.50, c: '140, 200, 235', a: 0.14, p: 2 },   // right, blue
+    { x: 0.15, y: 1.00, r: 0.45, c: '140, 200, 235', a: 0.12, p: 4 },   // bottom-left, green-teal
+    { x: 0.90, y: 1.00, r: 0.40, c: '140, 200, 235', a: 0.10, p: 1 }    // bottom-right
   ];
 
   /* ================= SETUP ================= */

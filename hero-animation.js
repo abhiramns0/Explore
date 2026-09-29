@@ -18,7 +18,10 @@
   const SPORE_COUNT        = 90;         // number of dots on desktop (0 = off)
   const SPORE_COUNT_MOBILE = 40;
   const SPORE_ALPHA        = 0.95;       // brightness
-  const SPORE_SIZE         = 1.15;       // size multiplier
+  const SPORE_SIZE         = 1.15;       // size multiplier (dot + glow together)
+  const SPORE_CORE         = 1;          // brightness of the bright centre (0 to 1)
+  const SPORE_HALO         = 1.3;        // strength of the soft glow around it (0 = none, 2 = strong)
+  const SPORE_CURSOR_GLOW  = 0.8;        // extra brightness near the cursor (0 = none)
   const SPORE_SPEED        = 1.7;        // how lively they drift (1 = slow, 3 = busy)
   const SPORE_TWINKLE      = 1;          // 0 = steady glow, 1 = soft pulse, 2 = strong pulse
   const SPORE_CURSOR_PUSH   = 22;        // max distance (px) a dot is nudged by the cursor
@@ -37,14 +40,22 @@
   const FLOW_NEAR    = 0.82;             // closest a flow may sit to the centre (bigger = pushed outward)
   const FLOW_FAR     = 1.10;             // furthest (above ~1.1 goes off screen)
 
+  // ---- Thin fluid lines (drawn along the flows) ----
+  const LINE_ALPHA   = 0.22;             // brightness (0 = off, 0.1 = faint, 0.4 = clear)
+  const LINE_STRANDS = 3;                // thin lines per flow
+  const LINE_WIDTH   = 1;                // line thickness (px)
+  const LINE_SPREAD  = 0.045;            // gap between strands (bigger = more spread out)
+  const LINE_CURSOR  = 1;                // how much lines bend and swirl near the cursor (0 = none, 2 = strong)
+  const LINE_COLOR   = '150, 215, 235';  // r, g, b
+
   // ---- Mist ----
   const FOG_COUNT        = 13;           // mist banks (desktop)
   const FOG_COUNT_MOBILE = 8;
   const FOG_ALPHA        = 0.11;         // mist strength (lower = subtler)
 
   // ---- Tree silhouettes ----
-  const TRUNKS        = 4;               // per side (0 = off)
-  const TRUNKS_MOBILE = 2;
+  const TRUNKS        = 0;               // per side (0 = off). These made the dark vertical bands
+  const TRUNKS_MOBILE = 0;
   const TRUNK_ALPHA   = 0.55;
 
   // ---- Calm zone: keeps the centre, the text and the top menu quiet ----
@@ -214,10 +225,11 @@
     c.width = c.height = S;
     const x = c.getContext('2d');
     const g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-    g.addColorStop(0, 'rgba(245, 255, 255, 1)');
-    g.addColorStop(0.10, `rgba(${rgb}, 0.85)`);
-    g.addColorStop(0.30, `rgba(${rgb}, 0.30)`);
-    g.addColorStop(0.60, `rgba(${rgb}, 0.07)`);
+    const h = v => Math.min(1, v * SPORE_HALO).toFixed(3);
+    g.addColorStop(0, `rgba(245, 255, 255, ${SPORE_CORE})`);
+    g.addColorStop(0.10, `rgba(${rgb}, ${(0.85 * SPORE_CORE).toFixed(3)})`);
+    g.addColorStop(0.30, `rgba(${rgb}, ${h(0.30)})`);
+    g.addColorStop(0.60, `rgba(${rgb}, ${h(0.07)})`);
     g.addColorStop(1, `rgba(${rgb}, 0)`);
     x.fillStyle = g;
     x.fillRect(0, 0, S, S);
@@ -380,6 +392,57 @@
     ctx.restore();
   }
 
+  /* ================= THIN FLUID LINES =================
+     A few fine strands follow each flow, drifting apart and together like water.
+     Near the cursor they bend away and swirl slightly, then settle back. */
+  function drawFlowLines() {
+    if (LINE_ALPHA <= 0 || !flows.length) return;
+    const N = 40, K = LINE_STRANDS, t = clock * 0.00004 * FLOW_SPEED * SPEED;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineWidth = LINE_WIDTH;
+    ctx.lineCap = 'butt';
+    for (const f of flows) {
+      const th = [], rh = [];
+      for (let i = 0; i < N; i++) {
+        const u = i / (N - 1);
+        th.push(f.th0 + clock * f.spin * SPEED + f.span * u + noise3(f.s1 + u * 1.3, t, 0) * 0.22 * FLOW_WOBBLE);
+        rh.push(f.rho + f.slope * (u - 0.5) + noise3(f.s2 + u * 1.6, t + 3.7, 7) * 0.13 * FLOW_WOBBLE);
+      }
+      for (let j = 0; j < K; j++) {
+        const off = j - (K - 1) / 2;
+        let px = 0, py = 0;
+        for (let i = 0; i < N; i++) {
+          const u = i / (N - 1);
+          const rho = rh[i] + off * LINE_SPREAD * (0.55 + 0.45 * Math.sin(u * 5 + f.s3 + clock * 0.00025 * FLOW_SPEED * SPEED));
+          let x = W / 2 + Math.cos(th[i]) * rho * W * 0.56;
+          let y = H / 2 + Math.sin(th[i]) * rho * H * 0.60;
+          let boost = 1;
+          if (cursor.k > 0.01 && LINE_CURSOR > 0) {
+            const dx = x - cursor.x, dy = y - cursor.y, d2 = dx * dx + dy * dy, d = Math.sqrt(d2) || 1;
+            const g = Math.exp(-d2 / (2 * 240 * 240)) * cursor.k * LINE_CURSOR;
+            x += dx / d * g * 60 - dy / d * g * 28;
+            y += dy / d * g * 60 + dx / d * g * 28;
+            boost = 1 + 0.9 * g;
+          }
+          if (i > 0) {
+            const taper = Math.sin(Math.PI * (i - 0.5) / (N - 1));
+            const a = LINE_ALPHA * intro * Math.pow(taper, 0.8) * boost * calmAt((x + px) / 2, (y + py) / 2);
+            if (a > 0.004) {
+              ctx.strokeStyle = `rgba(${LINE_COLOR}, ${Math.min(a, 1).toFixed(3)})`;
+              ctx.beginPath();
+              ctx.moveTo(px, py);
+              ctx.lineTo(x, y);
+              ctx.stroke();
+            }
+          }
+          px = x; py = y;
+        }
+      }
+    }
+    ctx.restore();
+  }
+
   /* ================= SPORES ================= */
   function spawnSpore(s, initial) {
     let x, y, tries = 0;
@@ -444,7 +507,7 @@
       a *= 0.1 + 0.9 * calmAt(x, y);
       if (cursor.k > 0.01) {                                // they glow a little brighter near the cursor
         const dx = x - cursor.x, dy = y - cursor.y;
-        a *= 1 + 0.8 * cursor.k * Math.exp(-(dx * dx + dy * dy) / (2 * 220 * 220));
+        a *= 1 + SPORE_CURSOR_GLOW * cursor.k * Math.exp(-(dx * dx + dy * dy) / (2 * 220 * 220));
       }
       if (a < 0.01) continue;
       ctx.globalAlpha = Math.min(a, 1);
@@ -540,6 +603,7 @@
 
     drawGlows();
     drawFlows();
+    drawFlowLines();
     drawFog(0);
     if (hasTrunks) {
       ctx.globalAlpha = intro;

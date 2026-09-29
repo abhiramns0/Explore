@@ -1,12 +1,9 @@
-/* hero-animation.js  |  "Living Topography"
+/* hero-animation.js  |  "Silk Topography"
    Draws on <canvas id="bg"> inside .hero-section.
-   Layers (back to front):
-     1. ambient light + far bokeh
-     2. topographic contour lines from a slowly evolving noise terrain
-        (the cursor raises a soft hill that the lines flow around)
-     3. drifting motes that travel along the contours
-     4. near bokeh (large, soft, parallax) for depth
-   The heading and paragraph stay readable: the terrain is dimmed behind them. */
+   A slowly evolving terrain is rendered as soft, glowing gradient ribbons
+   (no hard lines), lit from one side for a sense of depth, with a bloom halo.
+   The cursor raises a soft hill that the ribbons flow around, and tiny lights
+   drift along the ribbons. The text area stays calm and readable. */
 (() => {
   'use strict';
 
@@ -15,40 +12,37 @@
 
   const BG_CENTER = '#01131F';
   const BG_EDGE   = '#02060C';
-  const LOW  = [64, 128, 205];           // colour of the low contour lines (r,g,b)
-  const HIGH = [155, 222, 240];          // colour of the high contour lines
-  const TINTS = [[170, 220, 245], [140, 235, 225]];   // bokeh colours (blue, teal)
+  const LOW    = [36, 100, 200];         // ribbon colour in the low areas (r,g,b)
+  const HIGH   = [150, 226, 242];        // ribbon colour on the high areas
+  const ACCENT = [110, 225, 215];        // faint teal that drifts through the ribbons
 
-  // Terrain
-  const FLOW        = 0.000045;          // how fast the terrain evolves (lower = calmer)
-  const WARP        = 0.55;              // how swirly / organic the shapes are
-  const LEVEL_MIN   = -0.70;             // lowest contour level
-  const LEVEL_STEP  = 0.13;              // gap between contour levels
-  const LEVEL_COUNT = 15;                // number of contour lines
-  const INDEX_EVERY = 4;                 // every Nth line is drawn stronger (like a map)
-  const LINE_ALPHA  = 0.15;
-  const INDEX_ALPHA = 0.26;
-  const LINE_W      = 0.8;
-  const INDEX_W     = 1.3;
+  // Terrain + ribbons
+  const FLOW         = 0.000040;         // how fast the terrain evolves (lower = calmer)
+  const WARP         = 0.60;             // how swirly / organic the shapes are
+  const BAND_COUNT   = 4.0;              // ribbons per unit of terrain height (higher = more ribbons)
+  const BAND_DRIFT   = 0.000025;         // how fast ribbons slowly glide across the terrain
+  const RIDGE_SHARP  = 2.4;              // lower = softer, wider ribbons; higher = thinner
+  const RIDGE_ALPHA  = 0.55;             // brightness of the ribbons
+  const WASH_ALPHA   = 0.16;             // brightness of the broad gradient between ribbons
+  const LIGHT        = 0.55;             // 3D shading strength (0 = flat)
+  const BLOOM        = 0.55;             // glow halo strength (0 = off)
 
   // Cursor
-  const CURSOR_RADIUS = 190;             // size of the hill under the cursor (px)
-  const CURSOR_HEIGHT = 0.75;            // how tall the hill is
-  const PARALLAX_LINES = 10;             // px the terrain shifts with the cursor
-  const PARALLAX_BOKEH = 60;             // px near bokeh shifts with the cursor
+  const CURSOR_RADIUS = 200;             // size of the hill under the cursor (px)
+  const CURSOR_HEIGHT = 0.80;            // how tall the hill is
+  const CURSOR_LIGHT  = 0.50;            // how much the ribbons brighten near the cursor
+  const PARALLAX      = 14;              // px the terrain shifts with the cursor
 
-  // Bokeh
-  const BOKEH_COUNT = 34;
-  const BOKEH_COUNT_MOBILE = 16;
-
-  // Motes (tiny lights flowing along the contours)
-  const MOTE_COUNT = 60;
-  const MOTE_COUNT_MOBILE = 28;
+  // Tiny lights that ride the ribbons (set to 0 to remove)
+  const MOTE_COUNT = 36;
+  const MOTE_COUNT_MOBILE = 18;
 
   // Text protection
-  const QUIET_DIM   = 0.60;              // how much the terrain fades behind the text
-  const QUIET_PAD   = 20;                // clear margin around text for bokeh/motes
-  const QUIET_FADE  = 220;               // distance over which bokeh/motes fade back in
+  const QUIET_MIN  = 0.30;               // how visible the ribbons stay directly behind text
+  const QUIET_PAD  = 10;                 // clear margin around text (px)
+  const QUIET_FADE = 260;                // distance over which ribbons fade back in (px)
+
+  const FIELD_MS = 32;                   // terrain refresh interval (ms). 0 = every frame
 
   // Ambient light blobs (x, y, radius as fractions of the screen)
   const GLOWS = [
@@ -67,7 +61,6 @@
   const rand = (a, b) => a + Math.random() * (b - a);
   const clamp01 = v => Math.max(0, Math.min(1, v));
   const smooth = v => { v = clamp01(v); return v * v * (3 - 2 * v); };
-  const lerp = (a, b, t) => a + (b - a) * t;
 
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -75,7 +68,7 @@
   let clock = reduce ? 9000 : 0;         // own clock (ms), only advances while visible
   let intro = 0;
   let quiet = [];
-  let bokehFar = [], bokehNear = [], motes = [];
+  let motes = [];
   const cursor = { x: 0, y: 0, tx: 0, ty: 0, k: 0, amp: 0, px: 0, py: 0, inside: false };
 
   /* ================= SIMPLEX NOISE (3D) ================= */
@@ -142,7 +135,8 @@
   }
 
   /* ================= TERRAIN ================= */
-  let tz = 0;                            // terrain time
+  let tz = 0;          // terrain time
+  let phaseT = 0;      // slow ribbon glide
   const CURSOR_REACH2 = (CURSOR_RADIUS * 3) * (CURSOR_RADIUS * 3);
 
   // Height of the terrain at a point (domain-warped noise = organic swirls)
@@ -162,81 +156,120 @@
     return cursor.amp * Math.exp(-d2 / (2 * CURSOR_RADIUS * CURSOR_RADIUS));
   }
 
-  /* ================= GRID + CONTOURS ================= */
-  let cell = 16, tuned = false, cols = 0, rows = 0, ox = 0, oy = 0, F = new Float32Array(1);
+  const sampleField = (x, y) => terrain(x, y) + bump(x, y);
+  const ridgeAt = f => Math.pow(0.5 + 0.5 * Math.cos(TAU * (f * BAND_COUNT - phaseT)), RIDGE_SHARP);
+
+  /* ================= TEXTURE (the glowing ribbons) ================= */
+  // The terrain is sampled on a coarse grid, turned into soft ribbons of light in a
+  // small image, then scaled up smoothly. Scaling is what makes everything silky.
+  const MARGIN = 28;                     // extra texture around the screen (for parallax)
+  const off = document.createElement('canvas');
+  const offCtx = off.getContext('2d');
+  const bloomCv = document.createElement('canvas');
+  const bloomCtx = bloomCv.getContext('2d');
+  let res = 10, tuned = false;
+  let gw = 0, gh = 0, F = new Float32Array(1), Bm = new Float32Array(1), maskG = new Float32Array(1), img = null;
+  let fieldAcc = 1e9;
 
   function buildGrid() {
-    if (!tuned) cell = W < 768 ? 18 : Math.max(14, Math.min(24, Math.round(W / 110)));
-    ox = -cell * 2; oy = -cell * 2;
-    cols = Math.ceil(W / cell) + 5;
-    rows = Math.ceil(H / cell) + 5;
-    F = new Float32Array(cols * rows);
+    if (!tuned) res = W < 768 ? 8 : Math.max(8, Math.min(14, Math.round(W / 190)));
+    gw = Math.ceil((W + 2 * MARGIN) / res) + 1;
+    gh = Math.ceil((H + 2 * MARGIN) / res) + 1;
+    F = new Float32Array(gw * gh);
+    Bm = new Float32Array(gw * gh);
+    maskG = new Float32Array(gw * gh);
+    off.width = gw; off.height = gh;
+    img = offCtx.createImageData(gw, gh);
+    bloomCv.width = Math.max(2, Math.ceil(gw / 3));
+    bloomCv.height = Math.max(2, Math.ceil(gh / 3));
+    buildMask();
+    fieldAcc = 1e9;
   }
 
-  function computeField() {
+  // Per-pixel visibility: dimmed behind the heading and paragraph
+  function buildMask() {
+    if (!maskG.length || !gw) return;
     let n = 0;
-    for (let j = 0; j < rows; j++) {
-      const y = oy + j * cell;
-      for (let i = 0; i < cols; i++) {
-        const x = ox + i * cell;
-        F[n++] = terrain(x, y) + bump(x, y);
+    for (let j = 0; j < gh; j++) {
+      const y = -MARGIN + j * res;
+      for (let i = 0; i < gw; i++) {
+        const x = -MARGIN + i * res;
+        maskG[n++] = QUIET_MIN + (1 - QUIET_MIN) * quietMask(x, y);
       }
     }
   }
 
-  // Marching squares: adds the line segments of one contour level to the current path
-  function march(level) {
-    for (let j = 0; j < rows - 1; j++) {
-      const y0 = oy + j * cell;
-      let k = j * cols;
-      for (let i = 0; i < cols - 1; i++, k++) {
-        const a = F[k], b = F[k + 1], c = F[k + cols + 1], d = F[k + cols];
-        const idx = (a > level ? 8 : 0) | (b > level ? 4 : 0) | (c > level ? 2 : 0) | (d > level ? 1 : 0);
-        if (idx === 0 || idx === 15) continue;
-        const x0 = ox + i * cell;
-        const tx = x0 + cell * (level - a) / (b - a), ty = y0;                 // top
-        const rx = x0 + cell,                       ry = y0 + cell * (level - b) / (c - b); // right
-        const bx = x0 + cell * (level - d) / (c - d), by = y0 + cell;          // bottom
-        const lx = x0,                              ly = y0 + cell * (level - a) / (d - a); // left
-        switch (idx) {
-          case 1: case 14: ctx.moveTo(lx, ly); ctx.lineTo(bx, by); break;
-          case 2: case 13: ctx.moveTo(bx, by); ctx.lineTo(rx, ry); break;
-          case 3: case 12: ctx.moveTo(lx, ly); ctx.lineTo(rx, ry); break;
-          case 4: case 11: ctx.moveTo(tx, ty); ctx.lineTo(rx, ry); break;
-          case 6: case 9:  ctx.moveTo(tx, ty); ctx.lineTo(bx, by); break;
-          case 7: case 8:  ctx.moveTo(tx, ty); ctx.lineTo(lx, ly); break;
-          case 5:
-            if ((a + b + c + d) * 0.25 > level) { ctx.moveTo(tx, ty); ctx.lineTo(lx, ly); ctx.moveTo(bx, by); ctx.lineTo(rx, ry); }
-            else { ctx.moveTo(tx, ty); ctx.lineTo(rx, ry); ctx.moveTo(lx, ly); ctx.lineTo(bx, by); }
-            break;
-          case 10:
-            if ((a + b + c + d) * 0.25 > level) { ctx.moveTo(tx, ty); ctx.lineTo(rx, ry); ctx.moveTo(lx, ly); ctx.lineTo(bx, by); }
-            else { ctx.moveTo(tx, ty); ctx.lineTo(lx, ly); ctx.moveTo(bx, by); ctx.lineTo(rx, ry); }
-            break;
-        }
+  function updateTexture() {
+    const data = img.data;
+    const x0 = -MARGIN, y0 = -MARGIN;
+    let n = 0;
+    for (let j = 0; j < gh; j++) {
+      const y = y0 + j * res;
+      for (let i = 0; i < gw; i++, n++) {
+        const x = x0 + i * res;
+        const b = bump(x, y);
+        Bm[n] = b;
+        F[n] = terrain(x, y) + b;
       }
     }
+
+    for (let j = 0; j < gh; j++) {
+      const y = y0 + j * res;
+      const jm = j > 0 ? -gw : 0, jp = j < gh - 1 ? gw : 0;
+      for (let i = 0; i < gw; i++) {
+        const k = j * gw + i;
+        const x = x0 + i * res;
+        const im = i > 0 ? -1 : 0, ip = i < gw - 1 ? 1 : 0;
+        const f = F[k];
+
+        // soft ribbon + broad wash
+        const c = 0.5 + 0.5 * Math.cos(TAU * (f * BAND_COUNT - phaseT));
+        const ridge = Math.pow(c, RIDGE_SHARP);
+        const w = 0.5 + 0.5 * Math.cos(TAU * (f * BAND_COUNT * 0.45 + phaseT * 0.6 + 0.25));
+        let v = ridge * RIDGE_ALPHA + w * w * WASH_ALPHA;
+
+        // light from the top-left across the slope = relief
+        const gx = F[k + ip] - F[k + im], gy = F[k + jp] - F[k + jm];
+        const s = clamp01(0.5 - (gx * 0.6 + gy * 0.8) * 14);
+        v *= 1 + LIGHT * (s - 0.5) * 2;
+
+        // brighten near the cursor
+        v *= 1 + CURSOR_LIGHT * Math.min(1, Bm[k] / CURSOR_HEIGHT);
+
+        // colour: low = deep blue, high = pale cyan, with a faint teal drift
+        const h = clamp01((f + 0.85) / 1.7);
+        const drift = 0.35 * (0.5 + 0.5 * Math.sin(x * 0.0038 + y * 0.0029 + clock * 0.00005 * SPEED));
+        const r = LOW[0] + (HIGH[0] - LOW[0]) * h;
+        const g = LOW[1] + (HIGH[1] - LOW[1]) * h;
+        const bl = LOW[2] + (HIGH[2] - LOW[2]) * h;
+
+        const p = k * 4;
+        data[p]     = r + (ACCENT[0] - r) * drift;
+        data[p + 1] = g + (ACCENT[1] - g) * drift;
+        data[p + 2] = bl + (ACCENT[2] - bl) * drift;
+        data[p + 3] = clamp01(v * maskG[k] * intro) * 255;
+      }
+    }
+    offCtx.putImageData(img, 0, 0);
   }
 
-  function drawContours() {
+  function drawTexture() {
+    const dw = gw * res, dh = gh * res;
+    const dx = -MARGIN - res / 2 - cursor.px * PARALLAX;
+    const dy = -MARGIN - res / 2 - cursor.py * PARALLAX;
     ctx.save();
-    ctx.translate(-cursor.px * PARALLAX_LINES, -cursor.py * PARALLAX_LINES);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    for (let L = 0; L < LEVEL_COUNT; L++) {
-      const lv = L / (LEVEL_COUNT - 1);
-      const isIndex = L % INDEX_EVERY === 0;
-      const fade = smooth((clock - 600 - L * 140) / 1800);      // lines fade in one after another
-      const a = (isIndex ? INDEX_ALPHA : LINE_ALPHA) * (0.55 + 0.7 * lv) * fade;
-      if (a < 0.004) continue;
-      const r = Math.round(lerp(LOW[0], HIGH[0], lv));
-      const g = Math.round(lerp(LOW[1], HIGH[1], lv));
-      const b = Math.round(lerp(LOW[2], HIGH[2], lv));
-      ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
-      ctx.lineWidth = isIndex ? INDEX_W : LINE_W;
-      ctx.beginPath();
-      march(LEVEL_MIN + L * LEVEL_STEP);
-      ctx.stroke();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(off, dx, dy, dw, dh);
+
+    if (BLOOM > 0) {                     // cheap glow: shrink, then stretch back over the top
+      bloomCtx.imageSmoothingEnabled = true;
+      bloomCtx.imageSmoothingQuality = 'high';
+      bloomCtx.clearRect(0, 0, bloomCv.width, bloomCv.height);
+      bloomCtx.drawImage(off, 0, 0, bloomCv.width, bloomCv.height);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = BLOOM;
+      ctx.drawImage(bloomCv, dx, dy, dw, dh);
     }
     ctx.restore();
   }
@@ -250,10 +283,11 @@
       if (r.width < 2 || r.height < 2) return;
       quiet.push({ cx: r.left - hr.left + r.width / 2, cy: r.top - hr.top + r.height / 2, hw: r.width / 2, hh: r.height / 2 });
     });
+    buildMask();
   }
 
   // 0 inside the text area, rising smoothly to 1 further away
-  function mask(x, y) {
+  function quietMask(x, y) {
     let d = Infinity;
     for (const r of quiet) {
       const dx = Math.max(Math.abs(x - r.cx) - r.hw, 0);
@@ -263,46 +297,15 @@
     return smooth((d - QUIET_PAD) / QUIET_FADE);
   }
 
-  function drawShade() {
-    // soft dark pools behind the text so the terrain never fights with it
-    for (const r of quiet) {
-      ctx.save();
-      ctx.translate(r.cx, r.cy);
-      ctx.scale(r.hw + 130, r.hh + 100);
-      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-      g.addColorStop(0, `rgba(1, 15, 25, ${QUIET_DIM * intro})`);
-      g.addColorStop(0.55, `rgba(1, 15, 25, ${QUIET_DIM * 0.85 * intro})`);
-      g.addColorStop(1, 'rgba(1, 15, 25, 0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(-1, -1, 2, 2);
-      ctx.restore();
-    }
-    // gentle edge vignette for depth
+  function drawVignette() {
     const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W / 2, H / 2));
     v.addColorStop(0, 'rgba(2, 6, 12, 0)');
-    v.addColorStop(1, `rgba(2, 6, 12, ${0.55 * intro})`);
+    v.addColorStop(1, `rgba(2, 6, 12, ${0.5 * intro})`);
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, W, H);
   }
 
-  /* ================= SPRITES (pre-rendered for speed) ================= */
-  // kind 0 = in focus (bright rim), 1 = slightly soft, 2 = very soft glow
-  function makeBokeh(tint, kind) {
-    const S = 128, c = document.createElement('canvas');
-    c.width = c.height = S;
-    const x = c.getContext('2d');
-    const [r, g, b] = tint;
-    const gr = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-    const stops = [
-      [[0, .30], [.80, .42], [.93, .85], [1, 0]],
-      [[0, .30], [.70, .38], [.90, .60], [1, 0]],
-      [[0, .46], [.50, .30], [.85, .28], [1, 0]]
-    ][kind];
-    stops.forEach(([o, a]) => gr.addColorStop(o, `rgba(${r}, ${g}, ${b}, ${a})`));
-    x.fillStyle = gr;
-    x.fillRect(0, 0, S, S);
-    return c;
-  }
+  /* ================= MOTES (tiny lights riding the ribbons) ================= */
   function makeDot() {
     const S = 32, c = document.createElement('canvas');
     c.width = c.height = S;
@@ -316,71 +319,23 @@
     x.fillRect(0, 0, S, S);
     return c;
   }
-  const bokehSprites = TINTS.map(t => [0, 1, 2].map(k => makeBokeh(t, k)));
   const dotSprite = makeDot();
 
-  /* ================= BOKEH ================= */
-  function buildBokeh() {
-    bokehFar = []; bokehNear = [];
-    const n = W < 768 ? BOKEH_COUNT_MOBILE : BOKEH_COUNT;
-    for (let i = 0; i < n; i++) {
-      const z = Math.random();                       // 0 = far, 1 = near
-      const d = Math.abs(z - 0.5);                   // distance from the focal plane
-      const b = {
-        hx: rand(-0.04, 1.04) * W, hy: rand(-0.04, 1.04) * H,
-        z,
-        r: lerp(6, 62, Math.pow(z, 1.6)),
-        kind: d < 0.18 ? 0 : d < 0.34 ? 1 : 2,
-        tint: Math.random() < 0.25 ? 1 : 0,
-        a: 0.42 + 0.30 * (1 - d * 1.6),
-        ax: rand(10, 26) * (0.4 + z), ay: rand(10, 26) * (0.4 + z),
-        s1: rand(0.00006, 0.00013), s2: rand(0.00006, 0.00013),
-        p1: rand(0, TAU), p2: rand(0, TAU), p3: rand(0, TAU)
-      };
-      (z < 0.45 ? bokehFar : bokehNear).push(b);
-    }
-    bokehFar.sort((p, q) => p.z - q.z);
-    bokehNear.sort((p, q) => p.z - q.z);
-  }
-
-  function drawBokeh(list, near) {
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (const b of list) {
-      const par = (b.z - 0.35) * PARALLAX_BOKEH / 1;
-      const x = b.hx + Math.sin(clock * SPEED * b.s1 + b.p1) * b.ax - cursor.px * par;
-      const y = b.hy + Math.cos(clock * SPEED * b.s2 + b.p2) * b.ay - cursor.py * par;
-      const breathe = 0.8 + 0.2 * Math.sin(clock * 0.0004 * SPEED + b.p3);
-      let a = b.a * 0.55 * breathe * intro;
-      if (near) a *= 0.2 + 0.8 * mask(x, y);
-      if (cursor.k > 0.01) {                         // lights swell a little near the cursor
-        const dx = x - cursor.x, dy = y - cursor.y;
-        a *= 1 + 0.7 * cursor.k * Math.exp(-(dx * dx + dy * dy) / (2 * 260 * 260));
-      }
-      if (a < 0.008) continue;
-      ctx.globalAlpha = Math.min(a, 1);
-      ctx.drawImage(bokehSprites[b.tint][b.kind], x - b.r, y - b.r, b.r * 2, b.r * 2);
-    }
-    ctx.restore();
-  }
-
-  /* ================= MOTES ================= */
   function spawnMote(m, initial) {
     m.x = rand(0, W); m.y = rand(0, H);
     m.life = rand(9000, 16000);
     m.age = initial ? rand(0, m.life) : 0;
-    m.size = rand(0.6, 1.5);
-    m.spd = rand(10, 22);
+    m.size = rand(0.6, 1.4);
+    m.spd = rand(10, 20);
     m.dir = Math.random() < 0.5 ? -1 : 1;
     m.ph = rand(0, TAU);
+    m.glow = 0;
   }
   function buildMotes() {
     motes = [];
     const n = W < 768 ? MOTE_COUNT_MOBILE : MOTE_COUNT;
     for (let i = 0; i < n; i++) { const m = {}; spawnMote(m, true); motes.push(m); }
   }
-
-  function sampleField(x, y) { return terrain(x, y) + bump(x, y); }
 
   function updateMotes(dt) {
     for (const m of motes) {
@@ -390,22 +345,24 @@
       const gx = sampleField(m.x + 5, m.y) - f0;
       const gy = sampleField(m.x, m.y + 5) - f0;
       const len = Math.hypot(gx, gy) || 1;
-      // move along the contour (perpendicular to the slope), so lights trace the topology
+      // travel along the ribbon (perpendicular to the slope)
       const k = m.spd * SPEED * dt / 1000;
-      m.x += (-gy / len) * m.dir * k + Math.cos(clock * 0.0009 + m.ph) * 0.008 * dt;
-      m.y += ( gx / len) * m.dir * k + Math.sin(clock * 0.0011 + m.ph) * 0.008 * dt;
+      m.x += (-gy / len) * m.dir * k + Math.cos(clock * 0.0009 + m.ph) * 0.006 * dt;
+      m.y += ( gx / len) * m.dir * k + Math.sin(clock * 0.0011 + m.ph) * 0.006 * dt;
+      m.glow = ridgeAt(f0);              // lights glow brighter while riding a bright ribbon
     }
   }
 
   function drawMotes() {
+    if (!motes.length) return;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const m of motes) {
       const fade = smooth(m.age / 1500) * smooth((m.life - m.age) / 1500);
-      const twinkle = 0.65 + 0.35 * Math.sin(clock * 0.0016 + m.ph);
-      const a = fade * twinkle * 0.6 * intro * (0.25 + 0.75 * mask(m.x, m.y));
+      const twinkle = 0.7 + 0.3 * Math.sin(clock * 0.0016 + m.ph);
+      const a = fade * twinkle * 0.55 * intro * (0.3 + 0.7 * quietMask(m.x, m.y)) * (0.25 + 0.75 * m.glow);
       if (a < 0.01) continue;
-      const rad = 3 + m.size * 3.2;
+      const rad = 3 + m.size * 3;
       ctx.globalAlpha = a;
       ctx.drawImage(dotSprite, m.x - rad, m.y - rad, rad * 2, rad * 2);
     }
@@ -438,7 +395,7 @@
   }
 
   /* ================= UPDATE + DRAW ================= */
-  function step(dt) {
+  function step(dt, force) {
     const e = rate => 1 - Math.exp(-rate * dt / 1000);
 
     // cursor eases toward the pointer, so the hill trails it softly
@@ -452,12 +409,15 @@
     cursor.py += ((cursor.inside ? ny : 0) - cursor.py) * e(1.5);
 
     tz = clock * FLOW * SPEED;
-    computeField();
+    phaseT = clock * BAND_DRIFT * SPEED;
+    intro = smooth(clock / 2500);
+
+    fieldAcc += dt;
+    if (force || fieldAcc >= FIELD_MS) { fieldAcc = 0; updateTexture(); }
     updateMotes(dt);
   }
 
   function draw() {
-    intro = smooth(clock / 2500);
     const bg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.hypot(W / 2, H / 2));
     bg.addColorStop(0, BG_CENTER);
     bg.addColorStop(1, BG_EDGE);
@@ -465,12 +425,10 @@
     ctx.fillRect(0, 0, W, H);
 
     drawGlows();
-    drawBokeh(bokehFar, false);
     drawCursorGlow();
-    drawContours();
-    drawShade();
+    drawTexture();
+    drawVignette();
     drawMotes();
-    drawBokeh(bokehNear, true);
   }
 
   /* ================= LOOP ================= */
@@ -480,7 +438,7 @@
     // if the device struggles, quietly use a coarser terrain grid
     ema += (dt - ema) * 0.05;
     slow = ema > 27 ? slow + 1 : Math.max(0, slow - 1);
-    if (slow > 90 && cell < 30) { tuned = true; cell += 4; buildGrid(); slow = 0; ema = 16; }
+    if (slow > 90 && res < 18) { tuned = true; res += 2; buildGrid(); slow = 0; ema = 16; }
   }
 
   function frame(now) {
@@ -490,7 +448,7 @@
     last = now;
     clock += dt;
     watchPerformance(dt);
-    step(dt);
+    step(dt, false);
     draw();
     raf = requestAnimationFrame(frame);
   }
@@ -503,7 +461,7 @@
   function layout(rebuild) {
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     const w = hero.clientWidth, h = hero.clientHeight;
-    const oldH = H, widthChanged = w !== W;
+    const widthChanged = w !== W;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -511,15 +469,14 @@
     scale = 3.2 / Math.max(W, 1100);
     measure();
     buildGrid();
-    if (rebuild || widthChanged || !bokehFar.length && !bokehNear.length) { buildBokeh(); buildMotes(); }
-    else if (oldH) { [bokehFar, bokehNear].forEach(l => l.forEach(b => { b.hy *= h / oldH; })); }
-    if (reduce) { step(0); draw(); }
+    if (rebuild || widthChanged || !motes.length) buildMotes();
+    if (reduce) { step(0, true); draw(); }
   }
 
   window.addEventListener('resize', () => layout(false));
   window.addEventListener('load', () => layout(true));
-  hero.querySelectorAll('img').forEach(img => img.addEventListener('load', () => { measure(); if (reduce) draw(); }));
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { measure(); if (reduce) draw(); });
+  hero.querySelectorAll('img').forEach(img => img.addEventListener('load', () => { measure(); if (reduce) { step(0, true); draw(); } }));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { measure(); if (reduce) { step(0, true); draw(); } });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) start(); });
 
   if (!reduce) {

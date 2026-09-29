@@ -31,16 +31,6 @@
 
 <body>
 
-
-  
-<div class="animation-container" aria-hidden="true">
-    <svg id="animationSvg" preserveAspectRatio="none">
-      <path id="animTriangle" class="shape" />
-      <circle id="animCircle" class="shape" r="20" />
-    </svg>
-  </div>
-  <!-- Animation container (kept for future interactive BG; safe z-index via CSS) -->
-
   
 
   <!-- Navbar -->
@@ -222,8 +212,8 @@
 
   </main>
 
-  <!-- Keep your animation script if used -->
-  <script src="interactive-bg.js"></script>
+  <!-- Keep your animation script if used 
+  <script src="interactive-bg.js"></script> -->
 
   <!-- Navbar show/hide & scroll helpers -->
   <script>
@@ -281,6 +271,8 @@
         }
       });
 
+    </script>
+ 
       // Init state
       nav.classList.add('nav-top');
     })();

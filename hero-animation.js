@@ -19,12 +19,12 @@
   const SPORE_COUNT_MOBILE = 40;
   const SPORE_ALPHA        = 0.95;       // brightness
   const SPORE_SIZE         = 1.15;       // size multiplier (dot + glow together)
-  const SPORE_CORE         = 1;          // brightness of the bright centre (0 to 1)
-  const SPORE_HALO         = 1.3;        // strength of the soft glow around it (0 = none, 2 = strong)
+  const SPORE_CORE         = 1.5;       // brightness of the bright centre (0 to 1)
+  const SPORE_HALO         = 0.5;       // strength of the soft glow around it (0 = none, 2 = strong)
   const SPORE_CURSOR_GLOW  = 0.8;        // extra brightness near the cursor (0 = none)
-  const SPORE_SPEED        = 1.7;        // how lively they drift (1 = slow, 3 = busy)
+  const SPORE_SPEED        = 1.25;        // how lively they drift (1 = slow, 3 = busy)
   const SPORE_TWINKLE      = 1;          // 0 = steady glow, 1 = soft pulse, 2 = strong pulse
-  const SPORE_CURSOR_PUSH   = 22;        // max distance (px) a dot is nudged by the cursor
+  const SPORE_CURSOR_PUSH   = 100;        // max distance (px) a dot is nudged by the cursor
   const SPORE_CURSOR_RADIUS = 200;       // how close the cursor must be to affect dots (px)
   const SPORE_LIFE_MIN = 9;              // each dot fades in, lives, fades out (seconds)
   const SPORE_LIFE_MAX = 20;
@@ -41,8 +41,8 @@
   const FLOW_FAR     = 1.10;             // furthest (above ~1.1 goes off screen)
 
   // ---- Thin fluid lines (drawn along the flows) ----
-  const LINE_ALPHA   = 0.22;             // brightness (0 = off, 0.1 = faint, 0.4 = clear)
-  const LINE_STRANDS = 3;                // thin lines per flow
+  const LINE_ALPHA   = 0;             // brightness (0 = off, 0.1 = faint, 0.4 = clear)
+  const LINE_STRANDS = 0;                // thin lines per flow
   const LINE_WIDTH   = 1;                // line thickness (px)
   const LINE_SPREAD  = 0.045;            // gap between strands (bigger = more spread out)
   const LINE_CURSOR  = 1;                // how much lines bend and swirl near the cursor (0 = none, 2 = strong)

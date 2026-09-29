@@ -24,8 +24,8 @@
   const SPORE_CURSOR_GLOW  = 0.8;        // extra brightness near the cursor (0 = none)
   const SPORE_SPEED        = 1.25;        // how lively they drift (1 = slow, 3 = busy)
   const SPORE_TWINKLE      = 1;          // 0 = steady glow, 1 = soft pulse, 2 = strong pulse
-  const SPORE_CURSOR_PUSH   = 100;        // max distance (px) a dot is nudged by the cursor
-  const SPORE_CURSOR_RADIUS = 200;       // how close the cursor must be to affect dots (px)
+  const SPORE_CURSOR_PUSH   = 500;        // max distance (px) a dot is nudged by the cursor
+  const SPORE_CURSOR_RADIUS = 1000;       // how close the cursor must be to affect dots (px)
   const SPORE_LIFE_MIN = 9;              // each dot fades in, lives, fades out (seconds)
   const SPORE_LIFE_MAX = 20;
 
@@ -54,11 +54,11 @@
   const FOG_ALPHA        = 0.11;         // mist strength (lower = subtler)
 
   // ---- Calm zone: keeps the centre, the text and the top menu quiet ----
-  const CALM_X = 0.32;                   // width of the calm ellipse (fraction of screen width)
-  const CALM_Y = 0.30;                   // height of the calm ellipse (fraction of screen height)
+  const CALM_X = 0.22;                   // width of the calm ellipse (fraction of screen width)
+  const CALM_Y = 0.20;                   // height of the calm ellipse (fraction of screen height)
   const QUIET_PAD  = 30;                 // extra clear margin around the text (px)
   const QUIET_FADE = 420;                // distance over which things fade back in (px)
-  const NAV_ZONE_W = 520;                // clear area at the top middle (menu): width (px)
+  const NAV_ZONE_W = 320;                // clear area at the top middle (menu): width (px)
   const NAV_ZONE_H = 90;                 // ...and height (px)
 
   const TOUCH_LINGER = 1400;             // on phones: how long (ms) the effect stays after the finger lifts

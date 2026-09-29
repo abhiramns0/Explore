@@ -1,44 +1,59 @@
 /* hero-animation.js  |  "Mist Forest"
    Draws on <canvas id="bg"> inside .hero-section.
-   A calm, foggy, bioluminescent forest seen from its edge:
      - deep ambient colour pooling at the sides and bottom
-     - a few soft light shafts falling from the top corners
+     - soft fluid "flows" of light that curve around the centre (they avoid the text and the top menu)
      - drifting banks of mist, with tree silhouettes standing inside it
-     - tiny glowing spores floating slowly upward
-   Everything is built from soft gradients (no per-pixel textures, no lines),
-   and it is concentrated at the edges so the centre stays quiet for the text. */
+     - small glowing spores floating around, gently parting around the cursor
+   Everything is built from soft gradients, and concentrated at the edges so the centre stays quiet. */
 (() => {
   'use strict';
 
   /* ================= SETTINGS (safe to tweak) ================= */
-  const SPEED = 1;                       // global motion speed (0.5 = half)
+  const SPEED = 1;                       // global motion speed (0.5 = half, 2 = double)
 
   const BG_CENTER = '#01131F';
   const BG_EDGE   = '#02060C';
 
-  // Mist
+  // ---- Spores (the small glowing dots) ----
+  const SPORE_COUNT        = 90;         // number of dots on desktop (0 = off)
+  const SPORE_COUNT_MOBILE = 40;
+  const SPORE_ALPHA        = 0.95;       // brightness
+  const SPORE_SIZE         = 1.15;       // size multiplier
+  const SPORE_SPEED        = 1.7;        // how lively they drift (1 = slow, 3 = busy)
+  const SPORE_TWINKLE      = 1;          // 0 = steady glow, 1 = soft pulse, 2 = strong pulse
+  const SPORE_CURSOR_PUSH   = 22;        // max distance (px) a dot is nudged by the cursor
+  const SPORE_CURSOR_RADIUS = 200;       // how close the cursor must be to affect dots (px)
+  const SPORE_LIFE_MIN = 9;              // each dot fades in, lives, fades out (seconds)
+  const SPORE_LIFE_MAX = 20;
+
+  // ---- Fluid flows (the soft curved light in the background) ----
+  const FLOW_COUNT        = 5;           // number of flows (0 = off)
+  const FLOW_COUNT_MOBILE = 3;
+  const FLOW_ALPHA   = 0.07;             // strength (0.04 = very faint, 0.12 = clear)
+  const FLOW_WIDTH   = 170;              // thickness (px)
+  const FLOW_WOBBLE  = 1;                // how curvy / organic (0 = smooth arcs, 2 = very wavy)
+  const FLOW_SPEED   = 1;                // how fast the shapes morph
+  const FLOW_CURSOR  = 1;                // reaction to the cursor (0 = none, 2 = strong)
+  const FLOW_NEAR    = 0.82;             // closest a flow may sit to the centre (bigger = pushed outward)
+  const FLOW_FAR     = 1.10;             // furthest (above ~1.1 goes off screen)
+
+  // ---- Mist ----
   const FOG_COUNT        = 13;           // mist banks (desktop)
   const FOG_COUNT_MOBILE = 8;
   const FOG_ALPHA        = 0.11;         // mist strength (lower = subtler)
 
-  // Light shafts
-  const BEAM_ALPHA = 0.07;               // 0 = off
-
-  // Tree silhouettes
-  const TRUNKS       = 4;                // per side (0 = off)
+  // ---- Tree silhouettes ----
+  const TRUNKS        = 4;               // per side (0 = off)
   const TRUNKS_MOBILE = 2;
-  const TRUNK_ALPHA  = 0.55;
+  const TRUNK_ALPHA   = 0.55;
 
-  // Spores
-  const SPORE_COUNT        = 46;         // 0 = off
-  const SPORE_COUNT_MOBILE = 22;
-  const SPORE_ALPHA        = 0.75;       // brightness of the spores
-
-  // Keep the middle calm: the ellipse (fractions of width/height) where everything fades out
-  const CALM_X = 0.32;
-  const CALM_Y = 0.30;
+  // ---- Calm zone: keeps the centre, the text and the top menu quiet ----
+  const CALM_X = 0.32;                   // width of the calm ellipse (fraction of screen width)
+  const CALM_Y = 0.30;                   // height of the calm ellipse (fraction of screen height)
   const QUIET_PAD  = 30;                 // extra clear margin around the text (px)
   const QUIET_FADE = 420;                // distance over which things fade back in (px)
+  const NAV_ZONE_W = 520;                // clear area at the top middle (menu): width (px)
+  const NAV_ZONE_H = 90;                 // ...and height (px)
 
   const GRAIN = 0.02;                    // tiny film grain that hides gradient banding (0 = off)
 
@@ -68,10 +83,10 @@
   let clock = reduce ? 9000 : 0;         // own clock (ms), only advances while visible
   let intro = 0;
   let quiet = [];
-  let fog = [], spores = [], beamList = [];
+  let fog = [], spores = [], flows = [];
   const cursor = { x: 0, y: 0, tx: 0, ty: 0, k: 0, px: 0, py: 0, inside: false };
 
-  /* ================= NOISE (2D-in-time, for gentle organic drift) ================= */
+  /* ================= NOISE (for gentle organic drift) ================= */
   const grad3 = new Float32Array([
     1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1, 0,
     1, 0, 1, -1, 0, 1, 1, 0, -1, -1, 0, -1,
@@ -134,7 +149,7 @@
     return 32 * (n0 + n1 + n2 + n3);
   }
 
-  /* ================= CALM ZONE (keeps the middle and the text quiet) ================= */
+  /* ================= CALM ZONE (keeps the middle, the text and the menu quiet) ================= */
   function measure() {
     const hr = hero.getBoundingClientRect();
     quiet = [];
@@ -143,6 +158,8 @@
       if (r.width < 2 || r.height < 2) return;
       quiet.push({ cx: r.left - hr.left + r.width / 2, cy: r.top - hr.top + r.height / 2, hw: r.width / 2, hh: r.height / 2 });
     });
+    // top-middle menu area
+    quiet.push({ cx: W / 2, cy: NAV_ZONE_H / 2 + 6, hw: NAV_ZONE_W / 2, hh: NAV_ZONE_H / 2 });
   }
 
   // 0 in the calm middle / behind text, rising smoothly to 1 toward the edges
@@ -173,28 +190,23 @@
   const FOG_COLORS = ['70, 160, 190', '70, 120, 210', '60, 185, 165'];
   let fogGrads = [];
 
-  // Soft vertical shaft of light
-  function makeBeam() {
-    const w = 256, h = 512, c = document.createElement('canvas');
-    c.width = w; c.height = h;
+  // Soft round blob, stamped many times along a curve to make a flow
+  function makeSoft(rgb) {
+    const S = 128, c = document.createElement('canvas');
+    c.width = c.height = S;
     const x = c.getContext('2d');
-    const g = x.createLinearGradient(0, 0, w, 0);
-    for (let i = 0; i <= 16; i++) {
-      const t = i / 16, d = (t - 0.5) * 2;
-      g.addColorStop(t, `rgba(150, 225, 235, ${Math.exp(-d * d * 3.2).toFixed(4)})`);
+    const g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    const N = 12, e4 = Math.exp(-4);
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      const a = Math.max(0, (Math.exp(-4 * t * t) - e4) / (1 - e4));
+      g.addColorStop(t, `rgba(${rgb}, ${a.toFixed(4)})`);
     }
     x.fillStyle = g;
-    x.fillRect(0, 0, w, h);
-    x.globalCompositeOperation = 'destination-in';
-    const v = x.createLinearGradient(0, 0, 0, h);
-    v.addColorStop(0, 'rgba(0,0,0,1)');
-    v.addColorStop(0.5, 'rgba(0,0,0,0.45)');
-    v.addColorStop(1, 'rgba(0,0,0,0)');
-    x.fillStyle = v;
-    x.fillRect(0, 0, w, h);
+    x.fillRect(0, 0, S, S);
     return c;
   }
-  const beamSprite = makeBeam();
+  const flowSprites = ['70, 175, 175', '70, 125, 220', '110, 120, 215'].map(makeSoft);
 
   // Glowing spores in three tints (cyan-teal, soft blue, faint violet)
   function makeSpore(rgb) {
@@ -313,20 +325,76 @@
     ctx.globalAlpha = 1;
   }
 
+  /* ================= FLUID FLOWS =================
+     Each flow is a chain of soft blobs along a curved path that wraps around the
+     centre. The path wanders with slow noise, so the shape keeps morphing. */
+  function buildFlows() {
+    flows = [];
+    const n = W < 768 ? FLOW_COUNT_MOBILE : FLOW_COUNT;
+    for (let i = 0; i < n; i++) {
+      flows.push({
+        th0: (i / n) * TAU + rand(-0.45, 0.45),   // where around the screen it starts
+        span: rand(1.3, 2.3),                     // how far around it stretches (radians)
+        rho: rand(FLOW_NEAR, FLOW_FAR),           // distance from centre
+        slope: rand(-0.12, 0.12),                 // slight spiral
+        s1: rand(0, 100), s2: rand(0, 100), s3: rand(0, 100),
+        width: rand(0.75, 1.35),
+        tint: (Math.random() * flowSprites.length) | 0,
+        spin: rand(-1, 1) * 0.000004              // very slow rotation
+      });
+    }
+  }
+
+  function drawFlows() {
+    if (FLOW_ALPHA <= 0 || !flows.length) return;
+    const N = 22, t = clock * 0.00004 * FLOW_SPEED * SPEED;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const f of flows) {
+      const sprite = flowSprites[f.tint];
+      for (let i = 0; i < N; i++) {
+        const u = i / (N - 1);
+        const th = f.th0 + clock * f.spin * SPEED + f.span * u + noise3(f.s1 + u * 1.3, t, 0) * 0.22 * FLOW_WOBBLE;
+        const rho = f.rho + f.slope * (u - 0.5) + noise3(f.s2 + u * 1.6, t + 3.7, 7) * 0.13 * FLOW_WOBBLE;
+        let x = W / 2 + Math.cos(th) * rho * W * 0.56;
+        let y = H / 2 + Math.sin(th) * rho * H * 0.60;
+
+        const taper = Math.sin(Math.PI * u);
+        let r = FLOW_WIDTH * f.width * ui * (0.45 + 0.55 * taper) * (0.8 + 0.35 * noise3(f.s3 + u * 2, t + 9, 3));
+        let boost = 1;
+
+        if (cursor.k > 0.01 && FLOW_CURSOR > 0) {          // parts gently around the cursor
+          const dx = x - cursor.x, dy = y - cursor.y, d2 = dx * dx + dy * dy, d = Math.sqrt(d2) || 1;
+          const g = Math.exp(-d2 / (2 * 260 * 260)) * cursor.k * FLOW_CURSOR;
+          x += dx / d * g * 70;
+          y += dy / d * g * 70;
+          boost = 1 + 0.6 * g;
+        }
+
+        const a = FLOW_ALPHA * intro * Math.pow(taper, 0.7) * boost * calmAt(x, y);
+        if (a < 0.002) continue;
+        ctx.globalAlpha = Math.min(a, 1);
+        ctx.drawImage(sprite, x - r, y - r, r * 2, r * 2);
+      }
+    }
+    ctx.restore();
+  }
+
   /* ================= SPORES ================= */
   function spawnSpore(s, initial) {
     let x, y, tries = 0;
     do {
       x = rand(0, W);
-      y = initial ? rand(0, H) : H + rand(10, 60);
+      y = rand(0, H);
       tries++;
     } while (calmAt(x, y) < 0.45 && tries < 30);
-    s.x = x; s.y = y;
+    s.x = x; s.y = y; s.ox = 0; s.oy = 0;
     s.z = rand(0.25, 1);
     s.rad = lerp(5, 13, s.z * s.z);
     s.tint = Math.random() < 0.7 ? 0 : Math.random() < 0.7 ? 1 : 2;
     s.ph = rand(0, TAU);
-    s.pvx = 0; s.pvy = 0;
+    s.life = rand(SPORE_LIFE_MIN, SPORE_LIFE_MAX);
+    s.age = initial ? rand(0, s.life) : 0;
   }
   function buildSpores() {
     spores = [];
@@ -335,77 +403,58 @@
   }
 
   function updateSpores(dt) {
-    const damp = Math.exp(-1.6 * dt / 1000);
+    const e = rate => 1 - Math.exp(-rate * dt / 1000);
+    const t = clock * 0.00006 * SPEED;
+    const k = dt / 1000 * SPEED * SPORE_SPEED;
     for (const s of spores) {
-      if (s.y < -30) { spawnSpore(s, false); continue; }
-      const t = clock * 0.00004 * SPEED;
+      s.age += dt / 1000;
+      if (s.age > s.life || s.x < -40 || s.x > W + 40 || s.y < -40 || s.y > H + 40) { spawnSpore(s, false); continue; }
+
+      // slow flowing drift + a little individual wobble
       const fx = noise3(s.x * 0.0018, s.y * 0.0018, t);
       const fy = noise3(s.x * 0.0018 + 50, s.y * 0.0018, t + 9);
-      if (cursor.k > 0.01) {                                // spores softly part around the cursor
-        const dx = s.x - cursor.x, dy = s.y - cursor.y, d2 = dx * dx + dy * dy;
-        if (d2 < 240 * 240 && d2 > 1) {
-          const d = Math.sqrt(d2), f = (1 - d / 240) * 60 * cursor.k;
-          s.pvx += dx / d * f * dt / 1000;
-          s.pvy += dy / d * f * dt / 1000;
+      s.x += (fx * 14 * s.z + Math.sin(clock * 0.0009 + s.ph) * 7 * s.z) * k;
+      s.y += (-(2 + 5 * s.z) + fy * 12 * s.z + Math.cos(clock * 0.0007 + s.ph * 1.3) * 5 * s.z) * k;
+
+      // cursor: a small, bounded nudge that eases back quickly (never flings a dot away)
+      let tx = 0, ty = 0;
+      if (cursor.k > 0.01) {
+        const dx = s.x - cursor.x, dy = s.y - cursor.y, d = Math.hypot(dx, dy);
+        if (d < SPORE_CURSOR_RADIUS && d > 1) {
+          const q = 1 - d / SPORE_CURSOR_RADIUS;
+          const f = q * q * SPORE_CURSOR_PUSH * cursor.k;
+          tx = dx / d * f; ty = dy / d * f;
         }
       }
-      s.pvx *= damp; s.pvy *= damp;
-      const k = dt / 1000 * SPEED;
-      s.x += (fx * 10 * s.z + s.pvx * 40) * k;
-      s.y += (-(3 + 9 * s.z) + fy * 8 * s.z + s.pvy * 40) * k;
+      s.ox += (tx - s.ox) * e(3.5);
+      s.oy += (ty - s.oy) * e(3.5);
     }
   }
 
   function drawSpores() {
     if (!spores.length) return;
+    const sIntro = smooth(clock / 1200);                     // dots appear quickly
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const s of spores) {
-      const fadeY = smooth((H + 40 - s.y) / 100) * smooth((s.y + 30) / 140);
-      const pulse = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(clock * 0.0011 * SPEED + s.ph));
-      let a = SPORE_ALPHA * pulse * fadeY * intro * (0.35 + 0.65 * s.z);
-      const x = s.x - cursor.px * s.z * 14, y = s.y - cursor.py * s.z * 8;
-      a *= 0.15 + 0.85 * calmAt(x, y);
+      const env = smooth(s.age / 2) * smooth((s.life - s.age) / 2.5);
+      const pulse = Math.max(0.15, 1 - 0.65 * SPORE_TWINKLE * (0.5 - 0.5 * Math.sin(clock * 0.0016 * SPEED + s.ph)));
+      let a = SPORE_ALPHA * pulse * env * sIntro * (0.35 + 0.65 * s.z);
+      const x = s.x + s.ox - cursor.px * s.z * 14, y = s.y + s.oy - cursor.py * s.z * 8;
+      a *= 0.1 + 0.9 * calmAt(x, y);
       if (cursor.k > 0.01) {                                // they glow a little brighter near the cursor
         const dx = x - cursor.x, dy = y - cursor.y;
         a *= 1 + 0.8 * cursor.k * Math.exp(-(dx * dx + dy * dy) / (2 * 220 * 220));
       }
       if (a < 0.01) continue;
       ctx.globalAlpha = Math.min(a, 1);
-      const r = s.rad * ui;
+      const r = s.rad * SPORE_SIZE * ui;
       ctx.drawImage(sporeSprites[s.tint], x - r, y - r, r * 2, r * 2);
     }
     ctx.restore();
   }
 
   /* ================= LIGHT ================= */
-  function buildBeams() {
-    const all = [
-      { x: 0.05, w: 260, tilt: -0.16, p: 0.0 },
-      { x: 0.19, w: 200, tilt: -0.20, p: 1.7 },
-      { x: 0.83, w: 220, tilt: 0.20, p: 3.1 },
-      { x: 0.95, w: 280, tilt: 0.16, p: 4.6 }
-    ];
-    beamList = W < 768 ? [all[0], all[3]] : all;
-  }
-
-  function drawBeams() {
-    if (BEAM_ALPHA <= 0) return;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (const b of beamList) {
-      const breathe = 0.55 + 0.45 * Math.sin(clock * 0.00022 * SPEED + b.p);
-      const ang = b.tilt + Math.sin(clock * 0.00009 * SPEED + b.p * 2) * 0.025;
-      ctx.globalAlpha = BEAM_ALPHA * breathe * intro;
-      ctx.save();
-      ctx.translate(b.x * W, -40);
-      ctx.rotate(ang);
-      ctx.drawImage(beamSprite, -b.w * ui / 2, 0, b.w * ui, H * 1.4);
-      ctx.restore();
-    }
-    ctx.restore();
-  }
-
   function drawGlows() {
     for (const g of GLOWS) {
       const x = (g.x + Math.sin(clock * 0.00007 * SPEED + g.p) * 0.03) * W;
@@ -490,7 +539,7 @@
     ctx.fillRect(0, 0, W, H);
 
     drawGlows();
-    drawBeams();
+    drawFlows();
     drawFog(0);
     if (hasTrunks) {
       ctx.globalAlpha = intro;
@@ -535,7 +584,7 @@
     if (!grainPattern) grainPattern = ctx.createPattern(grainCv, 'repeat');
     measure();
     if (rebuild || widthChanged || !fog.length) {
-      buildFog(); buildSpores(); buildBeams(); buildTrunks();
+      buildFog(); buildSpores(); buildFlows(); buildTrunks();
     }
     if (reduce) { step(0); draw(); }
   }

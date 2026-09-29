@@ -1,52 +1,54 @@
-/* hero-animation.js  |  "Quiet Constellation"
+/* hero-animation.js  |  "Living Topography"
    Draws on <canvas id="bg"> inside .hero-section.
-   Layers: ambient light, flowing contour lines, sparse evolving connections.
-   Text zones (title + paragraph) stay clear automatically. */
+   Layers (back to front):
+     1. ambient light + far bokeh
+     2. topographic contour lines from a slowly evolving noise terrain
+        (the cursor raises a soft hill that the lines flow around)
+     3. drifting motes that travel along the contours
+     4. near bokeh (large, soft, parallax) for depth
+   The heading and paragraph stay readable: the terrain is dimmed behind them. */
 (() => {
   'use strict';
 
   /* ================= SETTINGS (safe to tweak) ================= */
-  const COLOR  = '140, 200, 235';   // main colour (r, g, b)
-  const ACCENT = '120, 225, 220';   // faint teal, used only for the travelling pulse
+  const SPEED = 1;                       // global motion speed (0.5 = half)
+
   const BG_CENTER = '#01131F';
   const BG_EDGE   = '#02060C';
-  const SPEED = 1;                  // global motion speed (0.5 = half speed)
+  const LOW  = [64, 128, 205];           // colour of the low contour lines (r,g,b)
+  const HIGH = [155, 222, 240];          // colour of the high contour lines
+  const TINTS = [[170, 220, 245], [140, 235, 225]];   // bokeh colours (blue, teal)
 
-  // Quiet zone around text
-  const QUIET_PADDING = 40;         // fully empty margin around the text (px)
-  const QUIET_FADE    = 170;        // distance over which elements fade back in (px)
-
-  // Nodes
-  const NODE_COUNT = 16;
-  const NODE_COUNT_MOBILE = 9;
-  const NODE_MIN_GAP = 120;         // minimum distance between nodes (prevents clusters)
-  const NODE_SIZE_MIN = 1.6;
-  const NODE_SIZE_MAX = 4.4;
-  const NODE_DRIFT = 8;             // how far a node wanders from its home (px)
-  const NODE_LEAN  = 10;            // how far nodes lean toward the cursor (px)
-  const NODE_ALPHA = 0.85;
-
-  // Links between nodes
-  const LINK_FIRST_MS = 4500;       // first link appears after this time
-  const LINK_EVERY_MIN = 2400;      // new link every 2.4 to 4.2 seconds
-  const LINK_EVERY_MAX = 4200;
-  const LINK_MAX = 6;               // links alive at once
-  const LINK_LIFE_MIN = 9000;
-  const LINK_LIFE_MAX = 14000;
-  const LINK_REACH = 340;           // longest allowed link (px)
-  const LINK_ALPHA = 0.32;
-  const PULSE_MS = 2200;            // travel time of the light pulse
-
-  // Contour lines
-  const LINES = 6;
-  const LINE_ALPHA = 0.11;
-  const LINE_WAVE = 1;              // wave height multiplier
+  // Terrain
+  const FLOW        = 0.000045;          // how fast the terrain evolves (lower = calmer)
+  const WARP        = 0.55;              // how swirly / organic the shapes are
+  const LEVEL_MIN   = -0.70;             // lowest contour level
+  const LEVEL_STEP  = 0.13;              // gap between contour levels
+  const LEVEL_COUNT = 15;                // number of contour lines
+  const INDEX_EVERY = 4;                 // every Nth line is drawn stronger (like a map)
+  const LINE_ALPHA  = 0.15;
+  const INDEX_ALPHA = 0.26;
+  const LINE_W      = 0.8;
+  const INDEX_W     = 1.3;
 
   // Cursor
-  const GLOW_RADIUS = 450;
-  const GLOW_ALPHA = 0.045;
-  const CURSOR_LINK_REACH = 260;
-  const CURSOR_BEND = 30;           // how much contour lines bend around the cursor (px)
+  const CURSOR_RADIUS = 190;             // size of the hill under the cursor (px)
+  const CURSOR_HEIGHT = 0.75;            // how tall the hill is
+  const PARALLAX_LINES = 10;             // px the terrain shifts with the cursor
+  const PARALLAX_BOKEH = 60;             // px near bokeh shifts with the cursor
+
+  // Bokeh
+  const BOKEH_COUNT = 34;
+  const BOKEH_COUNT_MOBILE = 16;
+
+  // Motes (tiny lights flowing along the contours)
+  const MOTE_COUNT = 60;
+  const MOTE_COUNT_MOBILE = 28;
+
+  // Text protection
+  const QUIET_DIM   = 0.60;              // how much the terrain fades behind the text
+  const QUIET_PAD   = 20;                // clear margin around text for bokeh/motes
+  const QUIET_FADE  = 220;               // distance over which bokeh/motes fade back in
 
   // Ambient light blobs (x, y, radius as fractions of the screen)
   const GLOWS = [
@@ -65,31 +67,188 @@
   const rand = (a, b) => a + Math.random() * (b - a);
   const clamp01 = v => Math.max(0, Math.min(1, v));
   const smooth = v => { v = clamp01(v); return v * v * (3 - 2 * v); };
+  const lerp = (a, b, t) => a + (b - a) * t;
 
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  let W = 0, H = 0;
-  let clock = reduce ? 7000 : 0;    // own clock (ms), only advances while visible
+  let W = 0, H = 0, scale = 0.0029;
+  let clock = reduce ? 9000 : 0;         // own clock (ms), only advances while visible
   let intro = 0;
   let quiet = [];
-  let nodes = [];
-  let links = [];
-  let nextLink = LINK_FIRST_MS;
-  const cursor = { x: 0, y: 0, tx: 0, ty: 0, k: 0, inside: false };
+  let bokehFar = [], bokehNear = [], motes = [];
+  const cursor = { x: 0, y: 0, tx: 0, ty: 0, k: 0, amp: 0, px: 0, py: 0, inside: false };
 
-  /* ================= QUIET ZONE ================= */
+  /* ================= SIMPLEX NOISE (3D) ================= */
+  const grad3 = new Float32Array([
+    1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1, 0,
+    1, 0, 1, -1, 0, 1, 1, 0, -1, -1, 0, -1,
+    0, 1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1
+  ]);
+  const perm = new Uint8Array(512), pm12 = new Uint8Array(512);
+  (function () {
+    const p = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) p[i] = i;
+    let s = 1337;
+    for (let i = 255; i > 0; i--) {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      const j = s % (i + 1);
+      const t = p[i]; p[i] = p[j]; p[j] = t;
+    }
+    for (let i = 0; i < 512; i++) { perm[i] = p[i & 255]; pm12[i] = perm[i] % 12; }
+  })();
+
+  function noise3(x, y, z) {
+    const F3 = 1 / 3, G3 = 1 / 6;
+    const s = (x + y + z) * F3;
+    const i = Math.floor(x + s), j = Math.floor(y + s), k = Math.floor(z + s);
+    const t = (i + j + k) * G3;
+    const x0 = x - (i - t), y0 = y - (j - t), z0 = z - (k - t);
+    let i1, j1, k1, i2, j2, k2;
+    if (x0 >= y0) {
+      if (y0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+      else if (x0 >= z0) { i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1; }
+      else { i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1; }
+    } else {
+      if (y0 < z0) { i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1; }
+      else if (x0 < z0) { i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1; }
+      else { i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0; }
+    }
+    const x1 = x0 - i1 + G3, y1 = y0 - j1 + G3, z1 = z0 - k1 + G3;
+    const x2 = x0 - i2 + 2 * G3, y2 = y0 - j2 + 2 * G3, z2 = z0 - k2 + 2 * G3;
+    const x3 = x0 - 1 + 3 * G3, y3 = y0 - 1 + 3 * G3, z3 = z0 - 1 + 3 * G3;
+    const ii = i & 255, jj = j & 255, kk = k & 255;
+    let n0 = 0, n1 = 0, n2 = 0, n3 = 0, gi;
+    let t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
+    if (t0 > 0) {
+      gi = pm12[ii + perm[jj + perm[kk]]] * 3; t0 *= t0;
+      n0 = t0 * t0 * (grad3[gi] * x0 + grad3[gi + 1] * y0 + grad3[gi + 2] * z0);
+    }
+    let t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
+    if (t1 > 0) {
+      gi = pm12[ii + i1 + perm[jj + j1 + perm[kk + k1]]] * 3; t1 *= t1;
+      n1 = t1 * t1 * (grad3[gi] * x1 + grad3[gi + 1] * y1 + grad3[gi + 2] * z1);
+    }
+    let t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
+    if (t2 > 0) {
+      gi = pm12[ii + i2 + perm[jj + j2 + perm[kk + k2]]] * 3; t2 *= t2;
+      n2 = t2 * t2 * (grad3[gi] * x2 + grad3[gi + 1] * y2 + grad3[gi + 2] * z2);
+    }
+    let t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
+    if (t3 > 0) {
+      gi = pm12[ii + 1 + perm[jj + 1 + perm[kk + 1]]] * 3; t3 *= t3;
+      n3 = t3 * t3 * (grad3[gi] * x3 + grad3[gi + 1] * y3 + grad3[gi + 2] * z3);
+    }
+    return 32 * (n0 + n1 + n2 + n3);
+  }
+
+  /* ================= TERRAIN ================= */
+  let tz = 0;                            // terrain time
+  const CURSOR_REACH2 = (CURSOR_RADIUS * 3) * (CURSOR_RADIUS * 3);
+
+  // Height of the terrain at a point (domain-warped noise = organic swirls)
+  function terrain(x, y) {
+    const sx = x * scale, sy = y * scale;
+    const wx = noise3(sx * 0.7 + 11.3, sy * 0.7, tz * 0.7);
+    const wy = noise3(sx * 0.7, sy * 0.7 + 27.1, tz * 0.7 + 5.2);
+    const px = sx + wx * WARP, py = sy + wy * WARP;
+    return noise3(px, py, tz) * 0.66 + noise3(px * 2.2 + 7.7, py * 2.2, tz * 1.5 + 3.1) * 0.26;
+  }
+
+  // The soft hill under the cursor
+  function bump(x, y) {
+    if (cursor.amp < 0.01) return 0;
+    const dx = x - cursor.x, dy = y - cursor.y, d2 = dx * dx + dy * dy;
+    if (d2 > CURSOR_REACH2) return 0;
+    return cursor.amp * Math.exp(-d2 / (2 * CURSOR_RADIUS * CURSOR_RADIUS));
+  }
+
+  /* ================= GRID + CONTOURS ================= */
+  let cell = 16, tuned = false, cols = 0, rows = 0, ox = 0, oy = 0, F = new Float32Array(1);
+
+  function buildGrid() {
+    if (!tuned) cell = W < 768 ? 18 : Math.max(14, Math.min(24, Math.round(W / 110)));
+    ox = -cell * 2; oy = -cell * 2;
+    cols = Math.ceil(W / cell) + 5;
+    rows = Math.ceil(H / cell) + 5;
+    F = new Float32Array(cols * rows);
+  }
+
+  function computeField() {
+    let n = 0;
+    for (let j = 0; j < rows; j++) {
+      const y = oy + j * cell;
+      for (let i = 0; i < cols; i++) {
+        const x = ox + i * cell;
+        F[n++] = terrain(x, y) + bump(x, y);
+      }
+    }
+  }
+
+  // Marching squares: adds the line segments of one contour level to the current path
+  function march(level) {
+    for (let j = 0; j < rows - 1; j++) {
+      const y0 = oy + j * cell;
+      let k = j * cols;
+      for (let i = 0; i < cols - 1; i++, k++) {
+        const a = F[k], b = F[k + 1], c = F[k + cols + 1], d = F[k + cols];
+        const idx = (a > level ? 8 : 0) | (b > level ? 4 : 0) | (c > level ? 2 : 0) | (d > level ? 1 : 0);
+        if (idx === 0 || idx === 15) continue;
+        const x0 = ox + i * cell;
+        const tx = x0 + cell * (level - a) / (b - a), ty = y0;                 // top
+        const rx = x0 + cell,                       ry = y0 + cell * (level - b) / (c - b); // right
+        const bx = x0 + cell * (level - d) / (c - d), by = y0 + cell;          // bottom
+        const lx = x0,                              ly = y0 + cell * (level - a) / (d - a); // left
+        switch (idx) {
+          case 1: case 14: ctx.moveTo(lx, ly); ctx.lineTo(bx, by); break;
+          case 2: case 13: ctx.moveTo(bx, by); ctx.lineTo(rx, ry); break;
+          case 3: case 12: ctx.moveTo(lx, ly); ctx.lineTo(rx, ry); break;
+          case 4: case 11: ctx.moveTo(tx, ty); ctx.lineTo(rx, ry); break;
+          case 6: case 9:  ctx.moveTo(tx, ty); ctx.lineTo(bx, by); break;
+          case 7: case 8:  ctx.moveTo(tx, ty); ctx.lineTo(lx, ly); break;
+          case 5:
+            if ((a + b + c + d) * 0.25 > level) { ctx.moveTo(tx, ty); ctx.lineTo(lx, ly); ctx.moveTo(bx, by); ctx.lineTo(rx, ry); }
+            else { ctx.moveTo(tx, ty); ctx.lineTo(rx, ry); ctx.moveTo(lx, ly); ctx.lineTo(bx, by); }
+            break;
+          case 10:
+            if ((a + b + c + d) * 0.25 > level) { ctx.moveTo(tx, ty); ctx.lineTo(rx, ry); ctx.moveTo(lx, ly); ctx.lineTo(bx, by); }
+            else { ctx.moveTo(tx, ty); ctx.lineTo(lx, ly); ctx.moveTo(bx, by); ctx.lineTo(rx, ry); }
+            break;
+        }
+      }
+    }
+  }
+
+  function drawContours() {
+    ctx.save();
+    ctx.translate(-cursor.px * PARALLAX_LINES, -cursor.py * PARALLAX_LINES);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let L = 0; L < LEVEL_COUNT; L++) {
+      const lv = L / (LEVEL_COUNT - 1);
+      const isIndex = L % INDEX_EVERY === 0;
+      const fade = smooth((clock - 600 - L * 140) / 1800);      // lines fade in one after another
+      const a = (isIndex ? INDEX_ALPHA : LINE_ALPHA) * (0.55 + 0.7 * lv) * fade;
+      if (a < 0.004) continue;
+      const r = Math.round(lerp(LOW[0], HIGH[0], lv));
+      const g = Math.round(lerp(LOW[1], HIGH[1], lv));
+      const b = Math.round(lerp(LOW[2], HIGH[2], lv));
+      ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
+      ctx.lineWidth = isIndex ? INDEX_W : LINE_W;
+      ctx.beginPath();
+      march(LEVEL_MIN + L * LEVEL_STEP);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* ================= QUIET ZONE (keeps text readable) ================= */
   function measure() {
     const hr = hero.getBoundingClientRect();
     quiet = [];
     document.querySelectorAll('.hero-heading, .hero-heading-image, .hero-description').forEach(el => {
       const r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2) return;
-      quiet.push({
-        cx: r.left - hr.left + r.width / 2,
-        cy: r.top - hr.top + r.height / 2,
-        hw: r.width / 2,
-        hh: r.height / 2
-      });
+      quiet.push({ cx: r.left - hr.left + r.width / 2, cy: r.top - hr.top + r.height / 2, hw: r.width / 2, hh: r.height / 2 });
     });
   }
 
@@ -101,111 +260,159 @@
       const dy = Math.max(Math.abs(y - r.cy) - r.hh, 0);
       d = Math.min(d, Math.hypot(dx, dy));
     }
-    return smooth((d - QUIET_PADDING) / QUIET_FADE);
+    return smooth((d - QUIET_PAD) / QUIET_FADE);
   }
 
-  /* ================= NODES & LINKS ================= */
-  function buildNodes() {
-    nodes = [];
-    links = [];
-    nextLink = clock < 3000 ? LINK_FIRST_MS : clock + 2500;
-    const count = W < 768 ? NODE_COUNT_MOBILE : NODE_COUNT;
-    let tries = 0;
-    while (nodes.length < count && tries++ < 4000) {
-      const x = rand(0.03, 0.97) * W;
-      const y = rand(0.04, 0.96) * H;
-      if (mask(x, y) < 0.65) continue;
-      if (nodes.some(o => Math.hypot(o.hx - x, o.hy - y) < NODE_MIN_GAP)) continue;
-      nodes.push({
-        hx: x, hy: y, x, y, ox: 0, oy: 0,
-        r: NODE_SIZE_MIN + (NODE_SIZE_MAX - NODE_SIZE_MIN) * Math.pow(Math.random(), 1.5),
-        p1: rand(0, TAU), p2: rand(0, TAU),
-        s1: rand(0.00008, 0.00016), s2: rand(0.00008, 0.00016),
-        intro: 0, ct: 0, cl: 0
-      });
+  function drawShade() {
+    // soft dark pools behind the text so the terrain never fights with it
+    for (const r of quiet) {
+      ctx.save();
+      ctx.translate(r.cx, r.cy);
+      ctx.scale(r.hw + 130, r.hh + 100);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      g.addColorStop(0, `rgba(1, 15, 25, ${QUIET_DIM * intro})`);
+      g.addColorStop(0.55, `rgba(1, 15, 25, ${QUIET_DIM * 0.85 * intro})`);
+      g.addColorStop(1, 'rgba(1, 15, 25, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(-1, -1, 2, 2);
+      ctx.restore();
     }
+    // gentle edge vignette for depth
+    const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W / 2, H / 2));
+    v.addColorStop(0, 'rgba(2, 6, 12, 0)');
+    v.addColorStop(1, `rgba(2, 6, 12, ${0.55 * intro})`);
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, W, H);
   }
 
-  const P = { x: 0, y: 0 };
-  // Point on a curved link (quadratic curve). bow = how much it bends.
-  function bez(ax, ay, bx, by, bow, t) {
-    const cx = (ax + bx) / 2 - (by - ay) * bow;
-    const cy = (ay + by) / 2 + (bx - ax) * bow;
-    const u = 1 - t;
-    P.x = u * u * ax + 2 * u * t * cx + t * t * bx;
-    P.y = u * u * ay + 2 * u * t * cy + t * t * by;
+  /* ================= SPRITES (pre-rendered for speed) ================= */
+  // kind 0 = in focus (bright rim), 1 = slightly soft, 2 = very soft glow
+  function makeBokeh(tint, kind) {
+    const S = 128, c = document.createElement('canvas');
+    c.width = c.height = S;
+    const x = c.getContext('2d');
+    const [r, g, b] = tint;
+    const gr = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    const stops = [
+      [[0, .30], [.80, .42], [.93, .85], [1, 0]],
+      [[0, .30], [.70, .38], [.90, .60], [1, 0]],
+      [[0, .46], [.50, .30], [.85, .28], [1, 0]]
+    ][kind];
+    stops.forEach(([o, a]) => gr.addColorStop(o, `rgba(${r}, ${g}, ${b}, ${a})`));
+    x.fillStyle = gr;
+    x.fillRect(0, 0, S, S);
+    return c;
   }
+  function makeDot() {
+    const S = 32, c = document.createElement('canvas');
+    c.width = c.height = S;
+    const x = c.getContext('2d');
+    const gr = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    gr.addColorStop(0, 'rgba(235, 250, 255, 1)');
+    gr.addColorStop(0.18, 'rgba(180, 225, 245, 0.7)');
+    gr.addColorStop(0.5, 'rgba(120, 190, 230, 0.16)');
+    gr.addColorStop(1, 'rgba(120, 190, 230, 0)');
+    x.fillStyle = gr;
+    x.fillRect(0, 0, S, S);
+    return c;
+  }
+  const bokehSprites = TINTS.map(t => [0, 1, 2].map(k => makeBokeh(t, k)));
+  const dotSprite = makeDot();
 
-  function spawnLink() {
-    if (links.length >= LINK_MAX) return false;
-    const pool = nodes.filter(n => n.intro > 0.9 && mask(n.x, n.y) > 0.6);
-    if (pool.length < 2) return false;
-    for (let tries = 0; tries < 8; tries++) {
-      const a = pool[(Math.random() * pool.length) | 0];
-      const near = pool.filter(o => o !== a)
-        .map(o => ({ o, d: Math.hypot(o.x - a.x, o.y - a.y) }))
-        .sort((p, q) => p.d - q.d)
-        .slice(0, 3);
-      const pick = near[(Math.random() * near.length) | 0];
-      if (!pick || pick.d > LINK_REACH) continue;
-      const b = pick.o;
-      if (links.some(l => (l.a === a && l.b === b) || (l.a === b && l.b === a))) continue;
-      const bow = (Math.random() < 0.5 ? -1 : 1) * rand(0.15, 0.3);
-      bez(a.x, a.y, b.x, b.y, bow, 0.5);
-      if (mask(P.x, P.y) < 0.45) continue;   // never cross the text
-      links.push({ a, b, bow, born: clock, life: rand(LINK_LIFE_MIN, LINK_LIFE_MAX), ph: rand(0, TAU) });
-      return true;
+  /* ================= BOKEH ================= */
+  function buildBokeh() {
+    bokehFar = []; bokehNear = [];
+    const n = W < 768 ? BOKEH_COUNT_MOBILE : BOKEH_COUNT;
+    for (let i = 0; i < n; i++) {
+      const z = Math.random();                       // 0 = far, 1 = near
+      const d = Math.abs(z - 0.5);                   // distance from the focal plane
+      const b = {
+        hx: rand(-0.04, 1.04) * W, hy: rand(-0.04, 1.04) * H,
+        z,
+        r: lerp(6, 62, Math.pow(z, 1.6)),
+        kind: d < 0.18 ? 0 : d < 0.34 ? 1 : 2,
+        tint: Math.random() < 0.25 ? 1 : 0,
+        a: 0.42 + 0.30 * (1 - d * 1.6),
+        ax: rand(10, 26) * (0.4 + z), ay: rand(10, 26) * (0.4 + z),
+        s1: rand(0.00006, 0.00013), s2: rand(0.00006, 0.00013),
+        p1: rand(0, TAU), p2: rand(0, TAU), p3: rand(0, TAU)
+      };
+      (z < 0.45 ? bokehFar : bokehNear).push(b);
     }
-    return false;
+    bokehFar.sort((p, q) => p.z - q.z);
+    bokehNear.sort((p, q) => p.z - q.z);
   }
 
-  /* ================= UPDATE ================= */
-  function step(dt) {
-    const e = rate => 1 - Math.exp(-rate * dt / 1000);
-
-    cursor.x += (cursor.tx - cursor.x) * e(6);
-    cursor.y += (cursor.ty - cursor.y) * e(6);
-    cursor.k += ((cursor.inside ? 1 : 0) - cursor.k) * e(2.5);
-
-    for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i];
-      n.intro = clamp01((clock - 1800 - i * 120) / 2200);
-      const tx = n.hx + Math.sin(clock * SPEED * n.s1 + n.p1) * NODE_DRIFT;
-      const ty = n.hy + Math.cos(clock * SPEED * n.s2 + n.p2) * NODE_DRIFT;
-      let px = 0, py = 0;
-      if (cursor.k > 0.01) {
-        const dx = cursor.x - tx, dy = cursor.y - ty, d = Math.hypot(dx, dy);
-        if (d < 280 && d > 1) {
-          const f = (1 - d / 280) * NODE_LEAN * cursor.k;
-          px = dx / d * f; py = dy / d * f;
-        }
+  function drawBokeh(list, near) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of list) {
+      const par = (b.z - 0.35) * PARALLAX_BOKEH / 1;
+      const x = b.hx + Math.sin(clock * SPEED * b.s1 + b.p1) * b.ax - cursor.px * par;
+      const y = b.hy + Math.cos(clock * SPEED * b.s2 + b.p2) * b.ay - cursor.py * par;
+      const breathe = 0.8 + 0.2 * Math.sin(clock * 0.0004 * SPEED + b.p3);
+      let a = b.a * 0.55 * breathe * intro;
+      if (near) a *= 0.2 + 0.8 * mask(x, y);
+      if (cursor.k > 0.01) {                         // lights swell a little near the cursor
+        const dx = x - cursor.x, dy = y - cursor.y;
+        a *= 1 + 0.7 * cursor.k * Math.exp(-(dx * dx + dy * dy) / (2 * 260 * 260));
       }
-      n.ox += (px - n.ox) * e(2);
-      n.oy += (py - n.oy) * e(2);
-      n.x = tx + n.ox;
-      n.y = ty + n.oy;
-      n.ct = 0;
+      if (a < 0.008) continue;
+      ctx.globalAlpha = Math.min(a, 1);
+      ctx.drawImage(bokehSprites[b.tint][b.kind], x - b.r, y - b.r, b.r * 2, b.r * 2);
     }
+    ctx.restore();
+  }
 
-    // Cursor becomes a temporary node: link to the 3 nearest nodes
-    if (cursor.k > 0.01) {
-      nodes.filter(n => n.intro > 0.5)
-        .map(n => ({ n, d: Math.hypot(n.x - cursor.x, n.y - cursor.y) }))
-        .sort((p, q) => p.d - q.d)
-        .slice(0, 3)
-        .forEach(({ n, d }) => { if (d < CURSOR_LINK_REACH) n.ct = 1 - d / CURSOR_LINK_REACH; });
-    }
-    nodes.forEach(n => { n.cl += (n.ct - n.cl) * e(2); });
+  /* ================= MOTES ================= */
+  function spawnMote(m, initial) {
+    m.x = rand(0, W); m.y = rand(0, H);
+    m.life = rand(9000, 16000);
+    m.age = initial ? rand(0, m.life) : 0;
+    m.size = rand(0.6, 1.5);
+    m.spd = rand(10, 22);
+    m.dir = Math.random() < 0.5 ? -1 : 1;
+    m.ph = rand(0, TAU);
+  }
+  function buildMotes() {
+    motes = [];
+    const n = W < 768 ? MOTE_COUNT_MOBILE : MOTE_COUNT;
+    for (let i = 0; i < n; i++) { const m = {}; spawnMote(m, true); motes.push(m); }
+  }
 
-    if (!reduce) {
-      if (clock >= nextLink) {
-        nextLink = clock + (spawnLink() ? rand(LINK_EVERY_MIN, LINK_EVERY_MAX) : 900);
-      }
-      links = links.filter(l => clock - l.born < l.life);
+  function sampleField(x, y) { return terrain(x, y) + bump(x, y); }
+
+  function updateMotes(dt) {
+    for (const m of motes) {
+      m.age += dt;
+      if (m.age > m.life || m.x < -30 || m.x > W + 30 || m.y < -30 || m.y > H + 30) { spawnMote(m, false); continue; }
+      const f0 = sampleField(m.x, m.y);
+      const gx = sampleField(m.x + 5, m.y) - f0;
+      const gy = sampleField(m.x, m.y + 5) - f0;
+      const len = Math.hypot(gx, gy) || 1;
+      // move along the contour (perpendicular to the slope), so lights trace the topology
+      const k = m.spd * SPEED * dt / 1000;
+      m.x += (-gy / len) * m.dir * k + Math.cos(clock * 0.0009 + m.ph) * 0.008 * dt;
+      m.y += ( gx / len) * m.dir * k + Math.sin(clock * 0.0011 + m.ph) * 0.008 * dt;
     }
   }
 
-  /* ================= DRAW ================= */
+  function drawMotes() {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const m of motes) {
+      const fade = smooth(m.age / 1500) * smooth((m.life - m.age) / 1500);
+      const twinkle = 0.65 + 0.35 * Math.sin(clock * 0.0016 + m.ph);
+      const a = fade * twinkle * 0.6 * intro * (0.25 + 0.75 * mask(m.x, m.y));
+      if (a < 0.01) continue;
+      const rad = 3 + m.size * 3.2;
+      ctx.globalAlpha = a;
+      ctx.drawImage(dotSprite, m.x - rad, m.y - rad, rad * 2, rad * 2);
+    }
+    ctx.restore();
+  }
+
+  /* ================= LIGHT ================= */
   function drawGlows() {
     for (const g of GLOWS) {
       const x = (g.x + Math.sin(clock * 0.00007 * SPEED + g.p) * 0.04) * W;
@@ -222,121 +429,31 @@
 
   function drawCursorGlow() {
     if (cursor.k < 0.01) return;
-    const gr = ctx.createRadialGradient(cursor.x, cursor.y, 0, cursor.x, cursor.y, GLOW_RADIUS);
-    gr.addColorStop(0, `rgba(90, 170, 220, ${GLOW_ALPHA * cursor.k})`);
-    gr.addColorStop(0.5, `rgba(90, 170, 220, ${GLOW_ALPHA * 0.4 * cursor.k})`);
+    const gr = ctx.createRadialGradient(cursor.x, cursor.y, 0, cursor.x, cursor.y, 420);
+    gr.addColorStop(0, `rgba(90, 170, 220, ${0.07 * cursor.k})`);
+    gr.addColorStop(0.5, `rgba(90, 170, 220, ${0.025 * cursor.k})`);
     gr.addColorStop(1, 'rgba(90, 170, 220, 0)');
     ctx.fillStyle = gr;
     ctx.fillRect(0, 0, W, H);
   }
 
-  function lineY(x, i, base) {
-    const t = clock * SPEED;
-    let y = base
-      + Math.sin(x * 0.0042 + t * 0.00013 + i * 1.3) * 22 * LINE_WAVE
-      + Math.sin(x * 0.0012 - t * 0.00008 + i * 2.1) * 42 * LINE_WAVE;
-    if (cursor.k > 0.01) {
-      const dx = x - cursor.x, dy = y - cursor.y, d = Math.hypot(dx, dy);
-      if (d < 220) {
-        const f = 1 - d / 220;
-        y += Math.tanh(dy / 50) * f * f * CURSOR_BEND * cursor.k;
-      }
-    }
-    return y;
-  }
+  /* ================= UPDATE + DRAW ================= */
+  function step(dt) {
+    const e = rate => 1 - Math.exp(-rate * dt / 1000);
 
-  function drawLines() {
-    const STEP = 14;
-    ctx.lineWidth = 0.9;
-    for (let i = 0; i < LINES; i++) {
-      const base = H * (0.08 + i * (0.84 / (LINES - 1)));
-      const baseA = LINE_ALPHA * (0.75 + 0.25 * ((i * 7) % 3) / 2) * intro;
-      let px = 0, py = lineY(0, i, base);
-      for (let x = STEP; x <= W + STEP; x += STEP) {
-        const y = lineY(x, i, base);
-        const mx = (x + px) / 2, my = (y + py) / 2;
-        const shimmer = 0.7 + 0.3 * Math.sin(mx * 0.003 - clock * 0.0002 * SPEED + i * 1.7);
-        const a = baseA * shimmer * mask(mx, my);
-        if (a > 0.005) {
-          ctx.strokeStyle = `rgba(${COLOR}, ${a})`;
-          ctx.beginPath();
-          ctx.moveTo(px, py);
-          ctx.lineTo(x, y);
-          ctx.stroke();
-        }
-        px = x; py = y;
-      }
-    }
-  }
+    // cursor eases toward the pointer, so the hill trails it softly
+    cursor.x += (cursor.tx - cursor.x) * e(4);
+    cursor.y += (cursor.ty - cursor.y) * e(4);
+    cursor.k += ((cursor.inside ? 1 : 0) - cursor.k) * e(2.2);
+    const lag = Math.hypot(cursor.tx - cursor.x, cursor.ty - cursor.y);
+    cursor.amp = CURSOR_HEIGHT * (0.7 + 0.3 * clamp01(lag / 160)) * cursor.k;
+    const nx = W ? (cursor.x / W - 0.5) * 2 : 0, ny = H ? (cursor.y / H - 0.5) * 2 : 0;
+    cursor.px += ((cursor.inside ? nx : 0) - cursor.px) * e(1.5);
+    cursor.py += ((cursor.inside ? ny : 0) - cursor.py) * e(1.5);
 
-  // Curved line drawn in small pieces so it can fade out near the text
-  function drawCurve(ax, ay, bx, by, bow, alpha, color, width) {
-    const S = 18;
-    let px = ax, py = ay;
-    ctx.lineWidth = width;
-    for (let i = 1; i <= S; i++) {
-      bez(ax, ay, bx, by, bow, i / S);
-      const x = P.x, y = P.y;
-      const a = mask((x + px) / 2, (y + py) / 2) * alpha;
-      if (a > 0.01) {
-        ctx.strokeStyle = `rgba(${color}, ${a})`;
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-      }
-      px = x; py = y;
-    }
-  }
-
-  function drawLinks() {
-    for (const l of links) {
-      const age = clock - l.born;
-      const env = smooth(age / 1500) * smooth((l.life - age) / 2500);
-      const bow = l.bow + Math.sin(clock * 0.0003 * SPEED + l.ph) * 0.04;
-      const a = LINK_ALPHA * env * Math.min(l.a.intro, l.b.intro);
-      drawCurve(l.a.x, l.a.y, l.b.x, l.b.y, bow, a, COLOR, 0.9);
-
-      if (age < PULSE_MS) {
-        const p = age / PULSE_MS;
-        bez(l.a.x, l.a.y, l.b.x, l.b.y, bow, p * p * (3 - 2 * p));
-        const pa = Math.sin(Math.PI * p) * 0.8 * mask(P.x, P.y);
-        if (pa > 0.01) {
-          const g = ctx.createRadialGradient(P.x, P.y, 0, P.x, P.y, 16);
-          g.addColorStop(0, `rgba(${ACCENT}, ${pa})`);
-          g.addColorStop(1, `rgba(${ACCENT}, 0)`);
-          ctx.fillStyle = g;
-          ctx.beginPath();
-          ctx.arc(P.x, P.y, 16, 0, TAU);
-          ctx.fill();
-        }
-      }
-    }
-  }
-
-  function drawCursorLinks() {
-    if (cursor.k < 0.01) return;
-    nodes.forEach((n, i) => {
-      if (n.cl < 0.01) return;
-      drawCurve(cursor.x, cursor.y, n.x, n.y, i % 2 ? 0.12 : -0.12, n.cl * 0.45 * cursor.k, COLOR, 0.8);
-    });
-  }
-
-  function drawNodes() {
-    for (const n of nodes) {
-      const a = n.intro * NODE_ALPHA * mask(n.x, n.y);
-      if (a < 0.01) continue;
-      const rad = n.r * 7;
-      const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, rad);
-      g.addColorStop(0, `rgba(${COLOR}, ${0.9 * a})`);
-      g.addColorStop(0.12, `rgba(${COLOR}, ${0.55 * a})`);
-      g.addColorStop(0.3, `rgba(${COLOR}, ${0.14 * a})`);
-      g.addColorStop(1, `rgba(${COLOR}, 0)`);
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, rad, 0, TAU);
-      ctx.fill();
-    }
+    tz = clock * FLOW * SPEED;
+    computeField();
+    updateMotes(dt);
   }
 
   function draw() {
@@ -348,22 +465,31 @@
     ctx.fillRect(0, 0, W, H);
 
     drawGlows();
+    drawBokeh(bokehFar, false);
     drawCursorGlow();
-    drawLines();
-    drawLinks();
-    drawCursorLinks();
-    drawNodes();
+    drawContours();
+    drawShade();
+    drawMotes();
+    drawBokeh(bokehNear, true);
   }
 
   /* ================= LOOP ================= */
-  let raf = 0, last = 0, visible = true;
+  let raf = 0, last = 0, visible = true, ema = 16, slow = 0;
+
+  function watchPerformance(dt) {
+    // if the device struggles, quietly use a coarser terrain grid
+    ema += (dt - ema) * 0.05;
+    slow = ema > 27 ? slow + 1 : Math.max(0, slow - 1);
+    if (slow > 90 && cell < 30) { tuned = true; cell += 4; buildGrid(); slow = 0; ema = 16; }
+  }
 
   function frame(now) {
     raf = 0;
-    if (!visible) { last = 0; return; }
+    if (!visible || document.hidden) { last = 0; return; }
     const dt = last ? Math.min(now - last, 50) : 16;
     last = now;
     clock += dt;
+    watchPerformance(dt);
     step(dt);
     draw();
     raf = requestAnimationFrame(frame);
@@ -375,22 +501,26 @@
 
   /* ================= LAYOUT & EVENTS ================= */
   function layout(rebuild) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     const w = hero.clientWidth, h = hero.clientHeight;
     const oldH = H, widthChanged = w !== W;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     W = w; H = h;
+    scale = 3.2 / Math.max(W, 1100);
     measure();
-    if (rebuild || widthChanged || !nodes.length) buildNodes();
-    else if (oldH) nodes.forEach(n => { n.hy *= h / oldH; });
+    buildGrid();
+    if (rebuild || widthChanged || !bokehFar.length && !bokehNear.length) { buildBokeh(); buildMotes(); }
+    else if (oldH) { [bokehFar, bokehNear].forEach(l => l.forEach(b => { b.hy *= h / oldH; })); }
     if (reduce) { step(0); draw(); }
   }
 
   window.addEventListener('resize', () => layout(false));
   window.addEventListener('load', () => layout(true));
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => layout(true));
+  hero.querySelectorAll('img').forEach(img => img.addEventListener('load', () => { measure(); if (reduce) draw(); }));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { measure(); if (reduce) draw(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) start(); });
 
   if (!reduce) {
     const setPointer = (cx, cy) => {

@@ -1,9 +1,12 @@
-/* hero-animation.js  |  "Silk Topography"
+/* hero-animation.js  |  "Mist Forest"
    Draws on <canvas id="bg"> inside .hero-section.
-   A slowly evolving terrain is rendered as soft, glowing gradient ribbons
-   (no hard lines), lit from one side for a sense of depth, with a bloom halo.
-   The cursor raises a soft hill that the ribbons flow around, and tiny lights
-   drift along the ribbons. The text area stays calm and readable. */
+   A calm, foggy, bioluminescent forest seen from its edge:
+     - deep ambient colour pooling at the sides and bottom
+     - a few soft light shafts falling from the top corners
+     - drifting banks of mist, with tree silhouettes standing inside it
+     - tiny glowing spores floating slowly upward
+   Everything is built from soft gradients (no per-pixel textures, no lines),
+   and it is concentrated at the edges so the centre stays quiet for the text. */
 (() => {
   'use strict';
 
@@ -12,43 +15,39 @@
 
   const BG_CENTER = '#01131F';
   const BG_EDGE   = '#02060C';
-  const LOW    = [36, 100, 200];         // ribbon colour in the low areas (r,g,b)
-  const HIGH   = [150, 226, 242];        // ribbon colour on the high areas
-  const ACCENT = [110, 225, 215];        // faint teal that drifts through the ribbons
 
-  // Terrain + ribbons
-  const FLOW         = 0.000040;         // how fast the terrain evolves (lower = calmer)
-  const WARP         = 0.60;             // how swirly / organic the shapes are
-  const BAND_COUNT   = 4.0;              // ribbons per unit of terrain height (higher = more ribbons)
-  const BAND_DRIFT   = 0.000025;         // how fast ribbons slowly glide across the terrain
-  const RIDGE_SHARP  = 2.4;              // lower = softer, wider ribbons; higher = thinner
-  const RIDGE_ALPHA  = 0.55;             // brightness of the ribbons
-  const WASH_ALPHA   = 0.16;             // brightness of the broad gradient between ribbons
-  const LIGHT        = 0.55;             // 3D shading strength (0 = flat)
-  const BLOOM        = 0.55;             // glow halo strength (0 = off)
+  // Mist
+  const FOG_COUNT        = 13;           // mist banks (desktop)
+  const FOG_COUNT_MOBILE = 8;
+  const FOG_ALPHA        = 0.11;         // mist strength (lower = subtler)
 
-  // Cursor
-  const CURSOR_RADIUS = 200;             // size of the hill under the cursor (px)
-  const CURSOR_HEIGHT = 0.80;            // how tall the hill is
-  const CURSOR_LIGHT  = 0.50;            // how much the ribbons brighten near the cursor
-  const PARALLAX      = 14;              // px the terrain shifts with the cursor
+  // Light shafts
+  const BEAM_ALPHA = 0.07;               // 0 = off
 
-  // Tiny lights that ride the ribbons (set to 0 to remove)
-  const MOTE_COUNT = 36;
-  const MOTE_COUNT_MOBILE = 18;
+  // Tree silhouettes
+  const TRUNKS       = 4;                // per side (0 = off)
+  const TRUNKS_MOBILE = 2;
+  const TRUNK_ALPHA  = 0.55;
 
-  // Text protection
-  const QUIET_MIN  = 0.30;               // how visible the ribbons stay directly behind text
-  const QUIET_PAD  = 10;                 // clear margin around text (px)
-  const QUIET_FADE = 260;                // distance over which ribbons fade back in (px)
+  // Spores
+  const SPORE_COUNT        = 46;         // 0 = off
+  const SPORE_COUNT_MOBILE = 22;
+  const SPORE_ALPHA        = 0.75;       // brightness of the spores
 
-  const FIELD_MS = 32;                   // terrain refresh interval (ms). 0 = every frame
+  // Keep the middle calm: the ellipse (fractions of width/height) where everything fades out
+  const CALM_X = 0.32;
+  const CALM_Y = 0.30;
+  const QUIET_PAD  = 30;                 // extra clear margin around the text (px)
+  const QUIET_FADE = 420;                // distance over which things fade back in (px)
 
-  // Ambient light blobs (x, y, radius as fractions of the screen)
+  const GRAIN = 0.02;                    // tiny film grain that hides gradient banding (0 = off)
+
+  // Ambient colour pools (x, y, radius as fractions of the screen)
   const GLOWS = [
-    { x: 0.06, y: 0.95, r: 0.50, c: '40, 120, 190', a: 0.13, p: 0 },
-    { x: 0.96, y: 0.05, r: 0.45, c: '50, 150, 180', a: 0.10, p: 2 },
-    { x: 0.90, y: 0.88, r: 0.38, c: '70, 110, 200', a: 0.07, p: 4 }
+    { x: 0.00, y: 0.60, r: 0.55, c: '30, 110, 140', a: 0.16, p: 0 },   // left, teal
+    { x: 1.00, y: 0.30, r: 0.50, c: '40, 100, 180', a: 0.14, p: 2 },   // right, blue
+    { x: 0.15, y: 1.00, r: 0.45, c: '40, 150, 130', a: 0.12, p: 4 },   // bottom-left, green-teal
+    { x: 0.90, y: 1.00, r: 0.40, c: '50, 120, 170', a: 0.10, p: 1 }    // bottom-right
   ];
 
   /* ================= SETUP ================= */
@@ -61,17 +60,18 @@
   const rand = (a, b) => a + Math.random() * (b - a);
   const clamp01 = v => Math.max(0, Math.min(1, v));
   const smooth = v => { v = clamp01(v); return v * v * (3 - 2 * v); };
+  const lerp = (a, b, t) => a + (b - a) * t;
 
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  let W = 0, H = 0, scale = 0.0029;
+  let W = 0, H = 0, ui = 1;
   let clock = reduce ? 9000 : 0;         // own clock (ms), only advances while visible
   let intro = 0;
   let quiet = [];
-  let motes = [];
-  const cursor = { x: 0, y: 0, tx: 0, ty: 0, k: 0, amp: 0, px: 0, py: 0, inside: false };
+  let fog = [], spores = [], beamList = [];
+  const cursor = { x: 0, y: 0, tx: 0, ty: 0, k: 0, px: 0, py: 0, inside: false };
 
-  /* ================= SIMPLEX NOISE (3D) ================= */
+  /* ================= NOISE (2D-in-time, for gentle organic drift) ================= */
   const grad3 = new Float32Array([
     1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1, 0,
     1, 0, 1, -1, 0, 1, 1, 0, -1, -1, 0, -1,
@@ -134,147 +134,7 @@
     return 32 * (n0 + n1 + n2 + n3);
   }
 
-  /* ================= TERRAIN ================= */
-  let tz = 0;          // terrain time
-  let phaseT = 0;      // slow ribbon glide
-  const CURSOR_REACH2 = (CURSOR_RADIUS * 3) * (CURSOR_RADIUS * 3);
-
-  // Height of the terrain at a point (domain-warped noise = organic swirls)
-  function terrain(x, y) {
-    const sx = x * scale, sy = y * scale;
-    const wx = noise3(sx * 0.7 + 11.3, sy * 0.7, tz * 0.7);
-    const wy = noise3(sx * 0.7, sy * 0.7 + 27.1, tz * 0.7 + 5.2);
-    const px = sx + wx * WARP, py = sy + wy * WARP;
-    return noise3(px, py, tz) * 0.66 + noise3(px * 2.2 + 7.7, py * 2.2, tz * 1.5 + 3.1) * 0.26;
-  }
-
-  // The soft hill under the cursor
-  function bump(x, y) {
-    if (cursor.amp < 0.01) return 0;
-    const dx = x - cursor.x, dy = y - cursor.y, d2 = dx * dx + dy * dy;
-    if (d2 > CURSOR_REACH2) return 0;
-    return cursor.amp * Math.exp(-d2 / (2 * CURSOR_RADIUS * CURSOR_RADIUS));
-  }
-
-  const sampleField = (x, y) => terrain(x, y) + bump(x, y);
-  const ridgeAt = f => Math.pow(0.5 + 0.5 * Math.cos(TAU * (f * BAND_COUNT - phaseT)), RIDGE_SHARP);
-
-  /* ================= TEXTURE (the glowing ribbons) ================= */
-  // The terrain is sampled on a coarse grid, turned into soft ribbons of light in a
-  // small image, then scaled up smoothly. Scaling is what makes everything silky.
-  const MARGIN = 28;                     // extra texture around the screen (for parallax)
-  const off = document.createElement('canvas');
-  const offCtx = off.getContext('2d');
-  const bloomCv = document.createElement('canvas');
-  const bloomCtx = bloomCv.getContext('2d');
-  let res = 10, tuned = false;
-  let gw = 0, gh = 0, F = new Float32Array(1), Bm = new Float32Array(1), maskG = new Float32Array(1), img = null;
-  let fieldAcc = 1e9;
-
-  function buildGrid() {
-    if (!tuned) res = W < 768 ? 8 : Math.max(8, Math.min(14, Math.round(W / 190)));
-    gw = Math.ceil((W + 2 * MARGIN) / res) + 1;
-    gh = Math.ceil((H + 2 * MARGIN) / res) + 1;
-    F = new Float32Array(gw * gh);
-    Bm = new Float32Array(gw * gh);
-    maskG = new Float32Array(gw * gh);
-    off.width = gw; off.height = gh;
-    img = offCtx.createImageData(gw, gh);
-    bloomCv.width = Math.max(2, Math.ceil(gw / 3));
-    bloomCv.height = Math.max(2, Math.ceil(gh / 3));
-    buildMask();
-    fieldAcc = 1e9;
-  }
-
-  // Per-pixel visibility: dimmed behind the heading and paragraph
-  function buildMask() {
-    if (!maskG.length || !gw) return;
-    let n = 0;
-    for (let j = 0; j < gh; j++) {
-      const y = -MARGIN + j * res;
-      for (let i = 0; i < gw; i++) {
-        const x = -MARGIN + i * res;
-        maskG[n++] = QUIET_MIN + (1 - QUIET_MIN) * quietMask(x, y);
-      }
-    }
-  }
-
-  function updateTexture() {
-    const data = img.data;
-    const x0 = -MARGIN, y0 = -MARGIN;
-    let n = 0;
-    for (let j = 0; j < gh; j++) {
-      const y = y0 + j * res;
-      for (let i = 0; i < gw; i++, n++) {
-        const x = x0 + i * res;
-        const b = bump(x, y);
-        Bm[n] = b;
-        F[n] = terrain(x, y) + b;
-      }
-    }
-
-    for (let j = 0; j < gh; j++) {
-      const y = y0 + j * res;
-      const jm = j > 0 ? -gw : 0, jp = j < gh - 1 ? gw : 0;
-      for (let i = 0; i < gw; i++) {
-        const k = j * gw + i;
-        const x = x0 + i * res;
-        const im = i > 0 ? -1 : 0, ip = i < gw - 1 ? 1 : 0;
-        const f = F[k];
-
-        // soft ribbon + broad wash
-        const c = 0.5 + 0.5 * Math.cos(TAU * (f * BAND_COUNT - phaseT));
-        const ridge = Math.pow(c, RIDGE_SHARP);
-        const w = 0.5 + 0.5 * Math.cos(TAU * (f * BAND_COUNT * 0.45 + phaseT * 0.6 + 0.25));
-        let v = ridge * RIDGE_ALPHA + w * w * WASH_ALPHA;
-
-        // light from the top-left across the slope = relief
-        const gx = F[k + ip] - F[k + im], gy = F[k + jp] - F[k + jm];
-        const s = clamp01(0.5 - (gx * 0.6 + gy * 0.8) * 14);
-        v *= 1 + LIGHT * (s - 0.5) * 2;
-
-        // brighten near the cursor
-        v *= 1 + CURSOR_LIGHT * Math.min(1, Bm[k] / CURSOR_HEIGHT);
-
-        // colour: low = deep blue, high = pale cyan, with a faint teal drift
-        const h = clamp01((f + 0.85) / 1.7);
-        const drift = 0.35 * (0.5 + 0.5 * Math.sin(x * 0.0038 + y * 0.0029 + clock * 0.00005 * SPEED));
-        const r = LOW[0] + (HIGH[0] - LOW[0]) * h;
-        const g = LOW[1] + (HIGH[1] - LOW[1]) * h;
-        const bl = LOW[2] + (HIGH[2] - LOW[2]) * h;
-
-        const p = k * 4;
-        data[p]     = r + (ACCENT[0] - r) * drift;
-        data[p + 1] = g + (ACCENT[1] - g) * drift;
-        data[p + 2] = bl + (ACCENT[2] - bl) * drift;
-        data[p + 3] = clamp01(v * maskG[k] * intro) * 255;
-      }
-    }
-    offCtx.putImageData(img, 0, 0);
-  }
-
-  function drawTexture() {
-    const dw = gw * res, dh = gh * res;
-    const dx = -MARGIN - res / 2 - cursor.px * PARALLAX;
-    const dy = -MARGIN - res / 2 - cursor.py * PARALLAX;
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(off, dx, dy, dw, dh);
-
-    if (BLOOM > 0) {                     // cheap glow: shrink, then stretch back over the top
-      bloomCtx.imageSmoothingEnabled = true;
-      bloomCtx.imageSmoothingQuality = 'high';
-      bloomCtx.clearRect(0, 0, bloomCv.width, bloomCv.height);
-      bloomCtx.drawImage(off, 0, 0, bloomCv.width, bloomCv.height);
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = BLOOM;
-      ctx.drawImage(bloomCv, dx, dy, dw, dh);
-    }
-    ctx.restore();
-  }
-
-  /* ================= QUIET ZONE (keeps text readable) ================= */
+  /* ================= CALM ZONE (keeps the middle and the text quiet) ================= */
   function measure() {
     const hr = hero.getBoundingClientRect();
     quiet = [];
@@ -283,97 +143,273 @@
       if (r.width < 2 || r.height < 2) return;
       quiet.push({ cx: r.left - hr.left + r.width / 2, cy: r.top - hr.top + r.height / 2, hw: r.width / 2, hh: r.height / 2 });
     });
-    buildMask();
   }
 
-  // 0 inside the text area, rising smoothly to 1 further away
-  function quietMask(x, y) {
+  // 0 in the calm middle / behind text, rising smoothly to 1 toward the edges
+  function calmAt(x, y) {
     let d = Infinity;
     for (const r of quiet) {
       const dx = Math.max(Math.abs(x - r.cx) - r.hw, 0);
       const dy = Math.max(Math.abs(y - r.cy) - r.hh, 0);
       d = Math.min(d, Math.hypot(dx, dy));
     }
-    return smooth((d - QUIET_PAD) / QUIET_FADE);
+    const q = smooth((d - QUIET_PAD) / QUIET_FADE);
+    const e = Math.hypot((x - W / 2) / (W * CALM_X), (y - H / 2) / (H * CALM_Y));
+    return Math.min(q, smooth((e - 0.5) / 0.9));
   }
 
-  function drawVignette() {
-    const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.hypot(W / 2, H / 2));
-    v.addColorStop(0, 'rgba(2, 6, 12, 0)');
-    v.addColorStop(1, `rgba(2, 6, 12, ${0.5 * intro})`);
-    ctx.fillStyle = v;
-    ctx.fillRect(0, 0, W, H);
+  /* ================= SPRITES & GRADIENTS ================= */
+  // Soft mist gradient on a unit circle (reused for every bank of mist)
+  function fogGradient(rgb) {
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    const N = 14, e4 = Math.exp(-4);
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      const a = Math.max(0, (Math.exp(-4 * t * t) - e4) / (1 - e4));
+      g.addColorStop(t, `rgba(${rgb}, ${a.toFixed(4)})`);
+    }
+    return g;
   }
+  const FOG_COLORS = ['70, 160, 190', '70, 120, 210', '60, 185, 165'];
+  let fogGrads = [];
 
-  /* ================= MOTES (tiny lights riding the ribbons) ================= */
-  function makeDot() {
-    const S = 32, c = document.createElement('canvas');
+  // Soft vertical shaft of light
+  function makeBeam() {
+    const w = 256, h = 512, c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    const g = x.createLinearGradient(0, 0, w, 0);
+    for (let i = 0; i <= 16; i++) {
+      const t = i / 16, d = (t - 0.5) * 2;
+      g.addColorStop(t, `rgba(150, 225, 235, ${Math.exp(-d * d * 3.2).toFixed(4)})`);
+    }
+    x.fillStyle = g;
+    x.fillRect(0, 0, w, h);
+    x.globalCompositeOperation = 'destination-in';
+    const v = x.createLinearGradient(0, 0, 0, h);
+    v.addColorStop(0, 'rgba(0,0,0,1)');
+    v.addColorStop(0.5, 'rgba(0,0,0,0.45)');
+    v.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = v;
+    x.fillRect(0, 0, w, h);
+    return c;
+  }
+  const beamSprite = makeBeam();
+
+  // Glowing spores in three tints (cyan-teal, soft blue, faint violet)
+  function makeSpore(rgb) {
+    const S = 48, c = document.createElement('canvas');
     c.width = c.height = S;
     const x = c.getContext('2d');
-    const gr = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-    gr.addColorStop(0, 'rgba(235, 250, 255, 1)');
-    gr.addColorStop(0.18, 'rgba(180, 225, 245, 0.7)');
-    gr.addColorStop(0.5, 'rgba(120, 190, 230, 0.16)');
-    gr.addColorStop(1, 'rgba(120, 190, 230, 0)');
-    x.fillStyle = gr;
+    const g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0, 'rgba(245, 255, 255, 1)');
+    g.addColorStop(0.10, `rgba(${rgb}, 0.85)`);
+    g.addColorStop(0.30, `rgba(${rgb}, 0.30)`);
+    g.addColorStop(0.60, `rgba(${rgb}, 0.07)`);
+    g.addColorStop(1, `rgba(${rgb}, 0)`);
+    x.fillStyle = g;
     x.fillRect(0, 0, S, S);
     return c;
   }
-  const dotSprite = makeDot();
+  const sporeSprites = ['120, 235, 215', '150, 200, 255', '190, 165, 255'].map(makeSpore);
 
-  function spawnMote(m, initial) {
-    m.x = rand(0, W); m.y = rand(0, H);
-    m.life = rand(9000, 16000);
-    m.age = initial ? rand(0, m.life) : 0;
-    m.size = rand(0.6, 1.4);
-    m.spd = rand(10, 20);
-    m.dir = Math.random() < 0.5 ? -1 : 1;
-    m.ph = rand(0, TAU);
-    m.glow = 0;
+  // Fine grain: dithers the gradients so there are no visible steps / bands
+  function makeGrain() {
+    const S = 96, c = document.createElement('canvas');
+    c.width = c.height = S;
+    const x = c.getContext('2d');
+    const id = x.createImageData(S, S);
+    for (let i = 0; i < S * S; i++) {
+      id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = 255;
+      id.data[i * 4 + 3] = Math.random() * 255;
+    }
+    x.putImageData(id, 0, 0);
+    return c;
   }
-  function buildMotes() {
-    motes = [];
-    const n = W < 768 ? MOTE_COUNT_MOBILE : MOTE_COUNT;
-    for (let i = 0; i < n; i++) { const m = {}; spawnMote(m, true); motes.push(m); }
-  }
+  const grainCv = makeGrain();
+  let grainPattern = null;
 
-  function updateMotes(dt) {
-    for (const m of motes) {
-      m.age += dt;
-      if (m.age > m.life || m.x < -30 || m.x > W + 30 || m.y < -30 || m.y > H + 30) { spawnMote(m, false); continue; }
-      const f0 = sampleField(m.x, m.y);
-      const gx = sampleField(m.x + 5, m.y) - f0;
-      const gy = sampleField(m.x, m.y + 5) - f0;
-      const len = Math.hypot(gx, gy) || 1;
-      // travel along the ribbon (perpendicular to the slope)
-      const k = m.spd * SPEED * dt / 1000;
-      m.x += (-gy / len) * m.dir * k + Math.cos(clock * 0.0009 + m.ph) * 0.006 * dt;
-      m.y += ( gx / len) * m.dir * k + Math.sin(clock * 0.0011 + m.ph) * 0.006 * dt;
-      m.glow = ridgeAt(f0);              // lights glow brighter while riding a bright ribbon
+  /* ================= TREE SILHOUETTES (drawn once, softly) ================= */
+  const trunkCv = document.createElement('canvas');
+  const TRUNK_PAD = 40, TRUNK_SCALE = 0.5;
+  let hasTrunks = false;
+
+  function buildTrunks() {
+    const per = W < 768 ? TRUNKS_MOBILE : TRUNKS;
+    hasTrunks = per > 0;
+    if (!hasTrunks) return;
+    trunkCv.width = Math.ceil((W + TRUNK_PAD * 2) * TRUNK_SCALE);
+    trunkCv.height = Math.ceil((H + TRUNK_PAD * 2) * TRUNK_SCALE);
+    const t = trunkCv.getContext('2d');
+    const off = TRUNK_PAD * TRUNK_SCALE;
+    t.setTransform(TRUNK_SCALE, 0, 0, TRUNK_SCALE, off, off);
+    t.lineJoin = 'round';
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < per; i++) {
+        const depth = Math.random();                       // 0 = far, 1 = near
+        const frac = 0.01 + (i / per) * 0.21 + rand(-0.015, 0.015);
+        const x = side < 0 ? W * frac : W * (1 - frac);
+        const w = lerp(22, 78, depth) * ui;
+        const seed = rand(0, 100), lean = rand(-30, 30) * (0.5 + depth);
+        const a = TRUNK_ALPHA * (0.35 + 0.65 * depth);
+        for (let k = 0; k < 8; k++) {                      // stacked strokes = soft edges
+          t.lineWidth = w * (0.55 + 0.9 * k / 7);
+          t.strokeStyle = `rgba(1, 5, 10, ${(a * 0.17).toFixed(4)})`;
+          t.beginPath();
+          for (let y = -30; y <= H + 30; y += 40) {
+            const xx = x + Math.sin(y * 0.004 + seed) * 14 * (0.5 + depth) + lean * (y / H);
+            if (y === -30) t.moveTo(xx, y); else t.lineTo(xx, y);
+          }
+          t.stroke();
+        }
+      }
     }
   }
 
-  function drawMotes() {
-    if (!motes.length) return;
+  /* ================= MIST ================= */
+  function buildFog() {
+    fogGrads = FOG_COLORS.map(fogGradient);
+    fog = [];
+    const n = W < 768 ? FOG_COUNT_MOBILE : FOG_COUNT;
+    for (let i = 0; i < n; i++) {
+      let x, y, tries = 0;
+      do { x = rand(-0.05, 1.05) * W; y = rand(0.05, 1.1) * H; tries++; } while (calmAt(x, y) < 0.55 && tries < 40);
+      const rx = rand(320, 620) * ui;
+      fog.push({
+        hx: x, hy: y, rx, ry: rx * rand(0.28, 0.5),
+        a: rand(0.55, 1) * FOG_ALPHA,
+        variant: x < W * 0.5 ? (Math.random() < 0.6 ? 2 : 0) : (Math.random() < 0.6 ? 1 : 0),
+        layer: Math.random() < 0.6 ? 0 : 1,               // 0 = behind the trees, 1 = in front
+        ax: rand(60, 140), ay: rand(20, 50),
+        sx: TAU / rand(70000, 130000), sy: TAU / rand(70000, 130000),
+        p1: rand(0, TAU), p2: rand(0, TAU), p3: rand(0, TAU),
+        par: rand(6, 18), ox: 0, oy: 0
+      });
+    }
+  }
+
+  function fogPos(b) {
+    return {
+      x: b.hx + Math.sin(clock * b.sx * SPEED + b.p1) * b.ax - cursor.px * b.par + b.ox,
+      y: b.hy + Math.cos(clock * b.sy * SPEED + b.p2) * b.ay - cursor.py * b.par * 0.5 + b.oy
+    };
+  }
+
+  function drawFog(layer) {
+    for (const b of fog) {
+      if (b.layer !== layer) continue;
+      const p = fogPos(b);
+      const breathe = 0.8 + 0.2 * Math.sin(clock * 0.0003 * SPEED + b.p3);
+      const a = b.a * breathe * intro * (layer ? 0.65 : 1) * (0.12 + 0.88 * calmAt(p.x, p.y));
+      if (a < 0.004) continue;
+      ctx.globalAlpha = a;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.scale(b.rx, b.ry);
+      ctx.fillStyle = fogGrads[b.variant];
+      ctx.fillRect(-1, -1, 2, 2);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ================= SPORES ================= */
+  function spawnSpore(s, initial) {
+    let x, y, tries = 0;
+    do {
+      x = rand(0, W);
+      y = initial ? rand(0, H) : H + rand(10, 60);
+      tries++;
+    } while (calmAt(x, y) < 0.45 && tries < 30);
+    s.x = x; s.y = y;
+    s.z = rand(0.25, 1);
+    s.rad = lerp(5, 13, s.z * s.z);
+    s.tint = Math.random() < 0.7 ? 0 : Math.random() < 0.7 ? 1 : 2;
+    s.ph = rand(0, TAU);
+    s.pvx = 0; s.pvy = 0;
+  }
+  function buildSpores() {
+    spores = [];
+    const n = W < 768 ? SPORE_COUNT_MOBILE : SPORE_COUNT;
+    for (let i = 0; i < n; i++) { const s = {}; spawnSpore(s, true); spores.push(s); }
+  }
+
+  function updateSpores(dt) {
+    const damp = Math.exp(-1.6 * dt / 1000);
+    for (const s of spores) {
+      if (s.y < -30) { spawnSpore(s, false); continue; }
+      const t = clock * 0.00004 * SPEED;
+      const fx = noise3(s.x * 0.0018, s.y * 0.0018, t);
+      const fy = noise3(s.x * 0.0018 + 50, s.y * 0.0018, t + 9);
+      if (cursor.k > 0.01) {                                // spores softly part around the cursor
+        const dx = s.x - cursor.x, dy = s.y - cursor.y, d2 = dx * dx + dy * dy;
+        if (d2 < 240 * 240 && d2 > 1) {
+          const d = Math.sqrt(d2), f = (1 - d / 240) * 60 * cursor.k;
+          s.pvx += dx / d * f * dt / 1000;
+          s.pvy += dy / d * f * dt / 1000;
+        }
+      }
+      s.pvx *= damp; s.pvy *= damp;
+      const k = dt / 1000 * SPEED;
+      s.x += (fx * 10 * s.z + s.pvx * 40) * k;
+      s.y += (-(3 + 9 * s.z) + fy * 8 * s.z + s.pvy * 40) * k;
+    }
+  }
+
+  function drawSpores() {
+    if (!spores.length) return;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    for (const m of motes) {
-      const fade = smooth(m.age / 1500) * smooth((m.life - m.age) / 1500);
-      const twinkle = 0.7 + 0.3 * Math.sin(clock * 0.0016 + m.ph);
-      const a = fade * twinkle * 0.55 * intro * (0.3 + 0.7 * quietMask(m.x, m.y)) * (0.25 + 0.75 * m.glow);
+    for (const s of spores) {
+      const fadeY = smooth((H + 40 - s.y) / 100) * smooth((s.y + 30) / 140);
+      const pulse = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(clock * 0.0011 * SPEED + s.ph));
+      let a = SPORE_ALPHA * pulse * fadeY * intro * (0.35 + 0.65 * s.z);
+      const x = s.x - cursor.px * s.z * 14, y = s.y - cursor.py * s.z * 8;
+      a *= 0.15 + 0.85 * calmAt(x, y);
+      if (cursor.k > 0.01) {                                // they glow a little brighter near the cursor
+        const dx = x - cursor.x, dy = y - cursor.y;
+        a *= 1 + 0.8 * cursor.k * Math.exp(-(dx * dx + dy * dy) / (2 * 220 * 220));
+      }
       if (a < 0.01) continue;
-      const rad = 3 + m.size * 3;
-      ctx.globalAlpha = a;
-      ctx.drawImage(dotSprite, m.x - rad, m.y - rad, rad * 2, rad * 2);
+      ctx.globalAlpha = Math.min(a, 1);
+      const r = s.rad * ui;
+      ctx.drawImage(sporeSprites[s.tint], x - r, y - r, r * 2, r * 2);
     }
     ctx.restore();
   }
 
   /* ================= LIGHT ================= */
+  function buildBeams() {
+    const all = [
+      { x: 0.05, w: 260, tilt: -0.16, p: 0.0 },
+      { x: 0.19, w: 200, tilt: -0.20, p: 1.7 },
+      { x: 0.83, w: 220, tilt: 0.20, p: 3.1 },
+      { x: 0.95, w: 280, tilt: 0.16, p: 4.6 }
+    ];
+    beamList = W < 768 ? [all[0], all[3]] : all;
+  }
+
+  function drawBeams() {
+    if (BEAM_ALPHA <= 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of beamList) {
+      const breathe = 0.55 + 0.45 * Math.sin(clock * 0.00022 * SPEED + b.p);
+      const ang = b.tilt + Math.sin(clock * 0.00009 * SPEED + b.p * 2) * 0.025;
+      ctx.globalAlpha = BEAM_ALPHA * breathe * intro;
+      ctx.save();
+      ctx.translate(b.x * W, -40);
+      ctx.rotate(ang);
+      ctx.drawImage(beamSprite, -b.w * ui / 2, 0, b.w * ui, H * 1.4);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
   function drawGlows() {
     for (const g of GLOWS) {
-      const x = (g.x + Math.sin(clock * 0.00007 * SPEED + g.p) * 0.04) * W;
-      const y = (g.y + Math.cos(clock * 0.00006 * SPEED + g.p * 1.7) * 0.04) * H;
+      const x = (g.x + Math.sin(clock * 0.00007 * SPEED + g.p) * 0.03) * W;
+      const y = (g.y + Math.cos(clock * 0.00006 * SPEED + g.p * 1.7) * 0.03) * H;
       const r = g.r * Math.max(W, H);
       const gr = ctx.createRadialGradient(x, y, 0, x, y, r);
       gr.addColorStop(0, `rgba(${g.c}, ${g.a * intro})`);
@@ -384,37 +420,66 @@
     }
   }
 
-  function drawCursorGlow() {
-    if (cursor.k < 0.01) return;
-    const gr = ctx.createRadialGradient(cursor.x, cursor.y, 0, cursor.x, cursor.y, 420);
-    gr.addColorStop(0, `rgba(90, 170, 220, ${0.07 * cursor.k})`);
-    gr.addColorStop(0.5, `rgba(90, 170, 220, ${0.025 * cursor.k})`);
-    gr.addColorStop(1, 'rgba(90, 170, 220, 0)');
-    ctx.fillStyle = gr;
+  // Dark pools over the centre and the text so it always stays calm
+  function drawCalm() {
+    const pool = (cx, cy, rx, ry, a) => {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(rx, ry);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      g.addColorStop(0, `rgba(1, 17, 28, ${a * intro})`);
+      g.addColorStop(0.6, `rgba(1, 17, 28, ${a * 0.7 * intro})`);
+      g.addColorStop(1, 'rgba(1, 17, 28, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(-1, -1, 2, 2);
+      ctx.restore();
+    };
+    pool(W / 2, H / 2, W * 0.36, H * 0.36, 0.35);
+    for (const r of quiet) pool(r.cx, r.cy, r.hw + 130, r.hh + 100, 0.4);
+  }
+
+  function drawVignette() {
+    const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.4, W / 2, H / 2, Math.hypot(W / 2, H / 2));
+    v.addColorStop(0, 'rgba(2, 6, 12, 0)');
+    v.addColorStop(1, `rgba(2, 6, 12, ${0.45 * intro})`);
+    ctx.fillStyle = v;
     ctx.fillRect(0, 0, W, H);
   }
 
+  function drawGrain() {
+    if (GRAIN <= 0 || !grainPattern) return;
+    ctx.save();
+    ctx.globalAlpha = GRAIN;
+    ctx.fillStyle = grainPattern;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
   /* ================= UPDATE + DRAW ================= */
-  function step(dt, force) {
+  function step(dt) {
     const e = rate => 1 - Math.exp(-rate * dt / 1000);
 
-    // cursor eases toward the pointer, so the hill trails it softly
     cursor.x += (cursor.tx - cursor.x) * e(4);
     cursor.y += (cursor.ty - cursor.y) * e(4);
     cursor.k += ((cursor.inside ? 1 : 0) - cursor.k) * e(2.2);
-    const lag = Math.hypot(cursor.tx - cursor.x, cursor.ty - cursor.y);
-    cursor.amp = CURSOR_HEIGHT * (0.7 + 0.3 * clamp01(lag / 160)) * cursor.k;
     const nx = W ? (cursor.x / W - 0.5) * 2 : 0, ny = H ? (cursor.y / H - 0.5) * 2 : 0;
     cursor.px += ((cursor.inside ? nx : 0) - cursor.px) * e(1.5);
     cursor.py += ((cursor.inside ? ny : 0) - cursor.py) * e(1.5);
 
-    tz = clock * FLOW * SPEED;
-    phaseT = clock * BAND_DRIFT * SPEED;
-    intro = smooth(clock / 2500);
+    intro = smooth(clock / 3000);
 
-    fieldAcc += dt;
-    if (force || fieldAcc >= FIELD_MS) { fieldAcc = 0; updateTexture(); }
-    updateMotes(dt);
+    // the mist gently parts around the cursor
+    for (const b of fog) {
+      let tx = 0, ty = 0;
+      if (cursor.k > 0.01) {
+        const dx = b.hx - cursor.x, dy = b.hy - cursor.y, d = Math.hypot(dx, dy) || 1;
+        const f = Math.exp(-(d * d) / (2 * 320 * 320)) * 46 * cursor.k;
+        tx = dx / d * f; ty = dy / d * f * 0.6;
+      }
+      b.ox += (tx - b.ox) * e(1.2);
+      b.oy += (ty - b.oy) * e(1.2);
+    }
+    updateSpores(dt);
   }
 
   function draw() {
@@ -425,21 +490,22 @@
     ctx.fillRect(0, 0, W, H);
 
     drawGlows();
-    drawCursorGlow();
-    drawTexture();
+    drawBeams();
+    drawFog(0);
+    if (hasTrunks) {
+      ctx.globalAlpha = intro;
+      ctx.drawImage(trunkCv, -TRUNK_PAD - cursor.px * 8, -TRUNK_PAD - cursor.py * 4, W + TRUNK_PAD * 2, H + TRUNK_PAD * 2);
+      ctx.globalAlpha = 1;
+    }
+    drawFog(1);
+    drawCalm();
+    drawSpores();
     drawVignette();
-    drawMotes();
+    drawGrain();
   }
 
   /* ================= LOOP ================= */
-  let raf = 0, last = 0, visible = true, ema = 16, slow = 0;
-
-  function watchPerformance(dt) {
-    // if the device struggles, quietly use a coarser terrain grid
-    ema += (dt - ema) * 0.05;
-    slow = ema > 27 ? slow + 1 : Math.max(0, slow - 1);
-    if (slow > 90 && res < 18) { tuned = true; res += 2; buildGrid(); slow = 0; ema = 16; }
-  }
+  let raf = 0, last = 0, visible = true;
 
   function frame(now) {
     raf = 0;
@@ -447,8 +513,7 @@
     const dt = last ? Math.min(now - last, 50) : 16;
     last = now;
     clock += dt;
-    watchPerformance(dt);
-    step(dt, false);
+    step(dt);
     draw();
     raf = requestAnimationFrame(frame);
   }
@@ -459,24 +524,28 @@
 
   /* ================= LAYOUT & EVENTS ================= */
   function layout(rebuild) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = hero.clientWidth, h = hero.clientHeight;
     const widthChanged = w !== W;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     W = w; H = h;
-    scale = 3.2 / Math.max(W, 1100);
+    ui = Math.max(0.55, Math.min(1.3, W / 1440));
+    if (!grainPattern) grainPattern = ctx.createPattern(grainCv, 'repeat');
     measure();
-    buildGrid();
-    if (rebuild || widthChanged || !motes.length) buildMotes();
-    if (reduce) { step(0, true); draw(); }
+    if (rebuild || widthChanged || !fog.length) {
+      buildFog(); buildSpores(); buildBeams(); buildTrunks();
+    }
+    if (reduce) { step(0); draw(); }
   }
+
+  const refresh = () => { measure(); if (reduce) { step(0); draw(); } };
 
   window.addEventListener('resize', () => layout(false));
   window.addEventListener('load', () => layout(true));
-  hero.querySelectorAll('img').forEach(img => img.addEventListener('load', () => { measure(); if (reduce) { step(0, true); draw(); } }));
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { measure(); if (reduce) { step(0, true); draw(); } });
+  hero.querySelectorAll('img').forEach(img => img.addEventListener('load', refresh));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(refresh);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) start(); });
 
   if (!reduce) {

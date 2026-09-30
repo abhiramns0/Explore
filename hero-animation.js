@@ -30,7 +30,7 @@
   const SPORE_LIFE_MAX = 20;
 
   // ---- Fluid flows (the soft curved light in the background) ----
-  const FLOW_COUNT        = 8;           // number of flows (0 = off) was 5
+  const FLOW_COUNT        = 16;           // number of flows (0 = off) was 8
   const FLOW_COUNT_MOBILE = 3;
   const FLOW_ALPHA   = 0.15;             // strength (0.04 = very faint, 0.12 = clear)
   const FLOW_WIDTH   = 120;              // thickness (px) was 150

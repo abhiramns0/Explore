@@ -320,17 +320,7 @@ main {
 }
 
 /* nth-of-type counts only <article> siblings, so the <h2> no longer shifts the numbering */
-.project-row:nth-of-type(1) .project-bg {
-    background-color: rgba(255, 255, 255, 0.04);
-}
 
-.project-row:nth-of-type(2) .project-bg {
-    background-color: rgba(120, 190, 255, 0.06);
-}
-
-.project-row:nth-of-type(3) .project-bg {
-    background-color: rgba(255, 255, 255, 0.05);
-}
 
 .project-left .project-media {
     flex: 0 0 800px;
